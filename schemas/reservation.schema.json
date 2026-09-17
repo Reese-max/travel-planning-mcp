@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://travel-planning-mcp.dev/schemas/reservation.schema.json",
+  "title": "Reservation",
+  "type": "object",
+  "required": ["reservation_id", "type", "status", "start_at", "fixed", "source"],
+  "properties": {
+    "reservation_id": { "type": "string", "format": "uuid" },
+    "type": {
+      "enum": ["flight", "hotel", "rail", "bus", "ferry", "restaurant", "activity", "ticket", "car_rental", "other"]
+    },
+    "status": { "enum": ["tentative", "confirmed", "cancelled", "completed"] },
+    "provider": { "type": ["string", "null"] },
+    "confirmation_code": { "type": ["string", "null"] },
+    "title": { "type": ["string", "null"] },
+    "start_at": { "type": "string", "format": "date-time" },
+    "end_at": { "type": ["string", "null"], "format": "date-time" },
+    "timezone": { "type": ["string", "null"] },
+    "fixed": {
+      "type": "boolean",
+      "description": "When true, planning agents must not move or materially modify the reservation without explicit approval."
+    },
+    "place_id": { "type": ["string", "null"], "format": "uuid" },
+    "origin_place_id": { "type": ["string", "null"], "format": "uuid" },
+    "destination_place_id": { "type": ["string", "null"], "format": "uuid" },
+    "traveler_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "price": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["amount", "currency"],
+          "properties": {
+            "amount": { "type": "number", "minimum": 0 },
+            "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "details": {
+      "type": "object",
+      "description": "Provider-independent extension bag for type-specific details such as flight number, hotel room, or seat.",
+      "additionalProperties": true
+    },
+    "cancellation": {
+      "type": ["object", "null"],
+      "properties": {
+        "deadline": { "type": ["string", "null"], "format": "date-time" },
+        "refundable": { "type": ["boolean", "null"] },
+        "notes": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["manual", "gmail", "calendar", "api", "import"] },
+        "provider": { "type": ["string", "null"] },
+        "source_id": { "type": ["string", "null"] },
+        "retrieved_at": { "type": ["string", "null"], "format": "date-time" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
