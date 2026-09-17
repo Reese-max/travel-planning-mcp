@@ -31,6 +31,7 @@ export interface TravelStore {
   listTripVersions(tripId: string): number[];
 
   getPlace(placeId: string): Place | undefined;
+  savePlace(place: Place): void;
   searchPlaces(query: string, limit?: number): Place[];
 
   getReservation(reservationId: string): Reservation | undefined;
