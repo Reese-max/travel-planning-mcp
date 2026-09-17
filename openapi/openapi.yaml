@@ -1,0 +1,174 @@
+openapi: 3.1.0
+info:
+  title: Travel Planning API
+  version: 0.1.0
+  description: >-
+    Planned REST surface over the same canonical service layer used by the MCP
+    server. AI-originated mutations must use ChangeProposal rather than raw trip
+    replacement.
+servers:
+  - url: https://api.example.invalid/v1
+    description: Placeholder only; no public deployment exists yet.
+paths:
+  /trips/{tripId}:
+    get:
+      summary: Read a canonical trip
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - name: version
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Trip snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '../schemas/trip.schema.json'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /trips/{tripId}/constraints:
+    get:
+      summary: Read constraints for a trip
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      responses:
+        '200':
+          description: Constraints
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [constraints]
+                properties:
+                  constraints:
+                    type: array
+                    items:
+                      $ref: '../schemas/constraint.schema.json'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /trips/{tripId}/proposals:
+    post:
+      summary: Create a change proposal
+      description: Creates a draft bound to the current trip version. Does not mutate the trip.
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operations]
+              properties:
+                title:
+                  type: string
+                summary:
+                  type: string
+                reason:
+                  type: string
+                operations:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [operation, target_type]
+                    properties:
+                      operation:
+                        enum: [add, remove, move, update, replace]
+                      target_type:
+                        enum: [trip_item, place, reservation, constraint]
+                      target_id:
+                        type: [string, 'null']
+                      from:
+                        type: [object, 'null']
+                        additionalProperties: true
+                      to:
+                        type: [object, 'null']
+                        additionalProperties: true
+                      reason:
+                        type: [string, 'null']
+      responses:
+        '201':
+          description: Draft proposal
+          content:
+            application/json:
+              schema:
+                $ref: '../schemas/change-proposal.schema.json'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /proposals/{proposalId}:
+    get:
+      summary: Read a proposal
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+      responses:
+        '200':
+          description: Proposal
+          content:
+            application/json:
+              schema:
+                $ref: '../schemas/change-proposal.schema.json'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /proposals/{proposalId}/validate:
+    post:
+      summary: Validate a proposal against the current trip and constraints
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+      responses:
+        '200':
+          description: Validated proposal
+          content:
+            application/json:
+              schema:
+                $ref: '../schemas/change-proposal.schema.json'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Proposal or trip version conflict
+  /proposals/{proposalId}/apply:
+    post:
+      summary: Apply an externally approved proposal
+      description: >-
+        The API must verify an operator/human approval receipt. The MCP server is
+        intentionally unable to approve its own proposal.
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+      responses:
+        '200':
+          description: New trip version created from the approved proposal
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [proposal, trip]
+                properties:
+                  proposal:
+                    $ref: '../schemas/change-proposal.schema.json'
+                  trip:
+                    $ref: '../schemas/trip.schema.json'
+        '409':
+          description: Not approved, invalid, or stale proposal
+components:
+  parameters:
+    TripId:
+      name: tripId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ProposalId:
+      name: proposalId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    NotFound:
+      description: Resource not found
