@@ -10,7 +10,8 @@ import type {
   TripDay,
   TripItem
 } from '../domain/types.js';
-import { store, type MemoryStore } from '../store/memory-store.js';
+import type { TravelStore } from '../ports/travel-store.js';
+import { store } from '../store/memory-store.js';
 
 export interface CreateProposalInput {
   tripId: string;
@@ -27,6 +28,12 @@ export interface ApproveProposalInput {
   actorId: string;
   channel: ApprovalReceipt['channel'];
   note?: string;
+}
+
+interface Evaluation {
+  validation: ProposalValidation;
+  simulated: Trip;
+  affectedDays: string[];
 }
 
 function findTripItem(trip: Trip, itemId: string): { day: TripDay; item: TripItem } | undefined {
@@ -109,7 +116,7 @@ function pushConstraintResult(
 }
 
 export class ProposalService {
-  constructor(private readonly db: MemoryStore = store) {}
+  constructor(private readonly db: TravelStore = store) {}
 
   create(input: CreateProposalInput): ChangeProposal {
     const trip = this.db.getTrip(input.tripId);
@@ -149,138 +156,23 @@ export class ProposalService {
   }
 
   validate(proposalId: string): ChangeProposal {
-    const proposal = this.db.getProposal(proposalId);
-    if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-
-    const trip = this.db.getTrip(proposal.trip_id);
-    if (!trip) throw new Error(`Trip not found: ${proposal.trip_id}`);
-
-    const result: ProposalValidation = {
-      valid: true,
-      validated_at: new Date().toISOString(),
-      hard_constraint_violations: [],
-      soft_constraint_warnings: [],
-      conflicts: []
-    };
-
-    if (trip.version !== proposal.base_trip_version) {
-      result.conflicts.push(
-        `Stale proposal: base version ${proposal.base_trip_version}, current version ${trip.version}.`
-      );
-    }
-
-    const constraints = this.db.getConstraintsForTrip(trip).filter((constraint) => constraint.enabled);
-    const fixedItemIds = new Set(
-      constraints
-        .filter((constraint) => constraint.type === 'fixed_item' && constraint.strength === 'hard')
-        .flatMap((constraint) => constraint.scope.item_ids ?? [])
-    );
-    const simulated = structuredClone(trip);
-    const affectedDays = new Set<string>();
-
-    for (const operation of proposal.operations) {
-      if (operation.target_type !== 'trip_item') {
-        result.conflicts.push(
-          `Operation ${operation.operation_id}: ${operation.target_type} mutations require a dedicated reviewed workflow.`
-        );
-        continue;
-      }
-
-      if (operation.operation === 'replace') {
-        result.conflicts.push(`Operation ${operation.operation_id}: replace is not supported by the safe apply path.`);
-        continue;
-      }
-
-      if (operation.operation === 'add') {
-        const date = asString(operation.to?.date);
-        const item = operation.to?.item;
-        if (!date || !isTripItem(item)) {
-          result.conflicts.push(
-            `Operation ${operation.operation_id}: add requires to.date and a valid to.item TripItem.`
-          );
-          continue;
-        }
-        if (item.locked) {
-          result.conflicts.push(
-            `Operation ${operation.operation_id}: AI proposals cannot create new locked items; lock state must come from a trusted reservation/import workflow.`
-          );
-          continue;
-        }
-        affectedDays.add(date);
-        try {
-          this.applyTripItemOperation(simulated, operation, false);
-        } catch (error) {
-          result.conflicts.push(
-            `Operation ${operation.operation_id}: ${error instanceof Error ? error.message : String(error)}`
-          );
-        }
-        continue;
-      }
-
-      if (!operation.target_id) {
-        result.conflicts.push(`Operation ${operation.operation_id}: target_id is required.`);
-        continue;
-      }
-
-      const located = findTripItem(trip, operation.target_id);
-      if (!located) {
-        result.conflicts.push(
-          `Operation ${operation.operation_id}: trip item ${operation.target_id} was not found.`
-        );
-        continue;
-      }
-
-      affectedDays.add(located.day.date);
-      const destinationDate = asString(operation.to?.date);
-      if (destinationDate) affectedDays.add(destinationDate);
-
-      let protectedItem = false;
-      if (located.item.locked || fixedItemIds.has(located.item.item_id)) {
-        protectedItem = true;
-        result.hard_constraint_violations.push(
-          `Operation ${operation.operation_id}: trip item ${operation.target_id} is locked or fixed.`
-        );
-      }
-
-      if (located.item.reservation_id) {
-        const reservation = this.db.getReservation(located.item.reservation_id);
-        if (reservation?.fixed) {
-          protectedItem = true;
-          result.hard_constraint_violations.push(
-            `Operation ${operation.operation_id}: reservation ${reservation.reservation_id} is fixed.`
-          );
-        }
-      }
-
-      if (protectedItem) continue;
-
-      try {
-        this.applyTripItemOperation(simulated, operation, false);
-      } catch (error) {
-        result.conflicts.push(
-          `Operation ${operation.operation_id}: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-    }
-
-    sortTripItems(simulated);
-    this.validateSchedule(simulated, result);
-    this.validateConstraints(simulated, constraints, result);
-
-    result.valid = result.hard_constraint_violations.length === 0 && result.conflicts.length === 0;
+    const proposal = this.requireProposal(proposalId);
+    const trip = this.requireTrip(proposal.trip_id);
+    const evaluation = this.evaluate(proposal, trip);
 
     const beforeMetrics = routeMetrics(trip);
-    const afterMetrics = routeMetrics(simulated);
+    const afterMetrics = routeMetrics(evaluation.simulated);
     const updated: ChangeProposal = {
       ...proposal,
-      validation: result,
+      validation: evaluation.validation,
       impact: {
         travel_minutes_delta: afterMetrics.travelMinutes - beforeMetrics.travelMinutes,
         walking_km_delta: Number((afterMetrics.walkingKm - beforeMetrics.walkingKm).toFixed(2)),
-        affected_days: [...affectedDays].sort()
+        affected_days: evaluation.affectedDays
       },
-      status: result.valid ? 'validated' : 'needs_review'
+      status: evaluation.validation.valid ? 'validated' : 'needs_review'
     };
+
     this.db.saveProposal(updated);
     this.audit({
       event_type: 'proposal_validated',
@@ -288,25 +180,36 @@ export class ProposalService {
       proposal_id: proposal.proposal_id,
       actor_type: 'system',
       metadata: {
-        valid: result.valid,
-        hard_violation_count: result.hard_constraint_violations.length,
-        soft_warning_count: result.soft_constraint_warnings.length,
-        conflict_count: result.conflicts.length
+        valid: evaluation.validation.valid,
+        hard_violation_count: evaluation.validation.hard_constraint_violations.length,
+        soft_warning_count: evaluation.validation.soft_constraint_warnings.length,
+        conflict_count: evaluation.validation.conflicts.length
       }
     });
     return updated;
   }
 
   approve(input: ApproveProposalInput): ChangeProposal {
-    const proposal = this.db.getProposal(input.proposalId);
-    if (!proposal) throw new Error(`Proposal not found: ${input.proposalId}`);
+    const proposal = this.requireProposal(input.proposalId);
     if (proposal.status !== 'validated' || !proposal.validation?.valid) {
       throw new Error('Only successfully validated proposals can be approved.');
     }
-    const current = this.db.getTrip(proposal.trip_id);
-    if (!current) throw new Error(`Trip not found: ${proposal.trip_id}`);
+
+    const current = this.requireTrip(proposal.trip_id);
     if (current.version !== proposal.base_trip_version) {
-      throw new Error(`Proposal is stale: expected trip v${proposal.base_trip_version}, current v${current.version}.`);
+      throw new Error(
+        `Proposal is stale: expected trip v${proposal.base_trip_version}, current v${current.version}.`
+      );
+    }
+
+    const evaluation = this.evaluate(proposal, current);
+    if (!evaluation.validation.valid) {
+      throw new Error(
+        `Proposal is no longer valid: ${[
+          ...evaluation.validation.hard_constraint_violations,
+          ...evaluation.validation.conflicts
+        ].join(' | ')}`
+      );
     }
 
     const approvedAt = new Date().toISOString();
@@ -319,6 +222,7 @@ export class ProposalService {
     };
     const approved = this.db.approveProposal(proposal.proposal_id, receipt);
     if (!approved) throw new Error('Failed to persist approval.');
+
     this.audit({
       event_type: 'proposal_approved',
       trip_id: proposal.trip_id,
@@ -331,8 +235,7 @@ export class ProposalService {
   }
 
   reject(proposalId: string, actorId: string, reason?: string): ChangeProposal {
-    const proposal = this.db.getProposal(proposalId);
-    if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
+    const proposal = this.requireProposal(proposalId);
     if (proposal.status === 'applied') throw new Error('Applied proposals cannot be rejected.');
 
     const rejected = this.db.setProposalStatus(proposalId, 'rejected', {
@@ -340,6 +243,7 @@ export class ProposalService {
       ...(reason ? { rejection_reason: reason } : {})
     });
     if (!rejected) throw new Error('Failed to persist rejection.');
+
     this.audit({
       event_type: 'proposal_rejected',
       trip_id: proposal.trip_id,
@@ -352,8 +256,7 @@ export class ProposalService {
   }
 
   apply(proposalId: string): { proposal: ChangeProposal; trip: Trip } {
-    const proposal = this.db.getProposal(proposalId);
-    if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
+    const proposal = this.requireProposal(proposalId);
     if (proposal.status !== 'approved' || !proposal.approval) {
       throw new Error('Proposal must have an explicit approval receipt before it can be applied.');
     }
@@ -361,19 +264,25 @@ export class ProposalService {
       throw new Error('Proposal must have a successful validation result before it can be applied.');
     }
 
-    const current = this.db.getTrip(proposal.trip_id);
-    if (!current) throw new Error(`Trip not found: ${proposal.trip_id}`);
+    const current = this.requireTrip(proposal.trip_id);
     if (current.version !== proposal.base_trip_version) {
-      throw new Error(`Proposal is stale: expected trip v${proposal.base_trip_version}, current v${current.version}.`);
+      throw new Error(
+        `Proposal is stale: expected trip v${proposal.base_trip_version}, current v${current.version}.`
+      );
     }
 
-    const next = structuredClone(current);
-    for (const operation of proposal.operations) {
-      this.applyTripItemOperation(next, operation, true);
+    const evaluation = this.evaluate(proposal, current);
+    if (!evaluation.validation.valid) {
+      throw new Error(
+        `Proposal failed apply-time revalidation: ${[
+          ...evaluation.validation.hard_constraint_violations,
+          ...evaluation.validation.conflicts
+        ].join(' | ')}`
+      );
     }
-    sortTripItems(next);
 
-    next.version += 1;
+    const next = evaluation.simulated;
+    next.version = current.version + 1;
     next.updated_at = new Date().toISOString();
     next.change_proposal_ids = [...(next.change_proposal_ids ?? []), proposal.proposal_id];
     this.db.saveTrip(next);
@@ -413,9 +322,168 @@ export class ProposalService {
       trip_id: tripId,
       actor_type: 'operator',
       actor_id: actorId,
-      metadata: { from_version: current.version, restored_from_version: targetVersion, new_version: restored.version }
+      metadata: {
+        from_version: current.version,
+        restored_from_version: targetVersion,
+        new_version: restored.version
+      }
     });
     return restored;
+  }
+
+  private evaluate(proposal: ChangeProposal, trip: Trip): Evaluation {
+    const result: ProposalValidation = {
+      valid: true,
+      validated_at: new Date().toISOString(),
+      hard_constraint_violations: [],
+      soft_constraint_warnings: [],
+      conflicts: []
+    };
+
+    if (trip.version !== proposal.base_trip_version) {
+      result.conflicts.push(
+        `Stale proposal: base version ${proposal.base_trip_version}, current version ${trip.version}.`
+      );
+    }
+
+    const constraints = this.db.getConstraintsForTrip(trip).filter((constraint) => constraint.enabled);
+    const fixedItemIds = new Set(
+      constraints
+        .filter((constraint) => constraint.type === 'fixed_item' && constraint.strength === 'hard')
+        .flatMap((constraint) => constraint.scope.item_ids ?? [])
+    );
+    const simulated = structuredClone(trip);
+    const affectedDays = new Set<string>();
+
+    for (const operation of proposal.operations) {
+      if (operation.target_type !== 'trip_item') {
+        result.conflicts.push(
+          `Operation ${operation.operation_id}: ${operation.target_type} mutations require a dedicated reviewed workflow.`
+        );
+        continue;
+      }
+
+      if (operation.operation === 'replace') {
+        result.conflicts.push(
+          `Operation ${operation.operation_id}: replace is not supported by the safe apply path.`
+        );
+        continue;
+      }
+
+      if (operation.operation === 'add') {
+        const date = asString(operation.to?.date);
+        const item = operation.to?.item;
+        if (!date || !isTripItem(item)) {
+          result.conflicts.push(
+            `Operation ${operation.operation_id}: add requires to.date and a valid to.item TripItem.`
+          );
+          continue;
+        }
+        if (item.locked) {
+          result.conflicts.push(
+            `Operation ${operation.operation_id}: AI proposals cannot create locked items; lock state must come from a trusted reservation/import workflow.`
+          );
+          continue;
+        }
+        if (item.reservation_id) {
+          const reservation = this.db.getReservation(item.reservation_id);
+          if (!reservation) {
+            result.conflicts.push(
+              `Operation ${operation.operation_id}: reservation ${item.reservation_id} does not exist.`
+            );
+            continue;
+          }
+          if (reservation.fixed) {
+            result.hard_constraint_violations.push(
+              `Operation ${operation.operation_id}: AI proposals cannot add/rebind fixed reservation ${reservation.reservation_id}; use a trusted reservation import workflow.`
+            );
+            continue;
+          }
+          const duplicate = simulated.days.some((day) =>
+            day.items.some((candidate) => candidate.reservation_id === item.reservation_id)
+          );
+          if (duplicate) {
+            result.conflicts.push(
+              `Operation ${operation.operation_id}: reservation ${item.reservation_id} is already represented in the itinerary.`
+            );
+            continue;
+          }
+        }
+
+        affectedDays.add(date);
+        this.tryApply(simulated, operation, false, result);
+        continue;
+      }
+
+      if (!operation.target_id) {
+        result.conflicts.push(`Operation ${operation.operation_id}: target_id is required.`);
+        continue;
+      }
+
+      const located = findTripItem(trip, operation.target_id);
+      if (!located) {
+        result.conflicts.push(
+          `Operation ${operation.operation_id}: trip item ${operation.target_id} was not found.`
+        );
+        continue;
+      }
+
+      affectedDays.add(located.day.date);
+      const destinationDate = asString(operation.to?.date);
+      if (destinationDate) affectedDays.add(destinationDate);
+
+      let protectedItem = false;
+      if (located.item.locked || fixedItemIds.has(located.item.item_id)) {
+        protectedItem = true;
+        result.hard_constraint_violations.push(
+          `Operation ${operation.operation_id}: trip item ${operation.target_id} is locked or fixed.`
+        );
+      }
+
+      if (located.item.reservation_id) {
+        const reservation = this.db.getReservation(located.item.reservation_id);
+        if (!reservation) {
+          protectedItem = true;
+          result.conflicts.push(
+            `Operation ${operation.operation_id}: reservation ${located.item.reservation_id} no longer exists.`
+          );
+        } else if (reservation.fixed) {
+          protectedItem = true;
+          result.hard_constraint_violations.push(
+            `Operation ${operation.operation_id}: reservation ${reservation.reservation_id} is fixed.`
+          );
+        }
+      }
+
+      if (protectedItem) continue;
+      this.tryApply(simulated, operation, false, result);
+    }
+
+    sortTripItems(simulated);
+    this.validateSchedule(simulated, result);
+    this.validateConstraints(simulated, constraints, result);
+    result.valid = result.hard_constraint_violations.length === 0 && result.conflicts.length === 0;
+
+    return {
+      validation: result,
+      simulated,
+      affectedDays: [...affectedDays].sort()
+    };
+  }
+
+  private tryApply(
+    trip: Trip,
+    operation: ChangeOperation,
+    enforceLocks: boolean,
+    result: ProposalValidation
+  ): void {
+    try {
+      this.applyTripItemOperation(trip, operation, enforceLocks);
+    } catch (error) {
+      result.conflicts.push(
+        `Operation ${operation.operation_id}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   private validateSchedule(trip: Trip, result: ProposalValidation): void {
@@ -450,7 +518,11 @@ export class ProposalService {
     }
   }
 
-  private validateConstraints(trip: Trip, constraints: Constraint[], result: ProposalValidation): void {
+  private validateConstraints(
+    trip: Trip,
+    constraints: Constraint[],
+    result: ProposalValidation
+  ): void {
     const supported = new Set<Constraint['type']>([
       'fixed_item',
       'time_window',
@@ -478,7 +550,11 @@ export class ProposalService {
       if (constraint.type === 'must_visit') {
         const placeId = asString(constraint.parameters.place_id);
         if (placeId && !trip.days.some((day) => day.items.some((item) => item.place_id === placeId))) {
-          pushConstraintResult(constraint, `required place ${placeId} is missing from the itinerary.`, result);
+          pushConstraintResult(
+            constraint,
+            `required place ${placeId} is missing from the itinerary.`,
+            result
+          );
         }
         continue;
       }
@@ -523,7 +599,11 @@ export class ProposalService {
           for (const item of scopedItems) {
             const time = hhmmFromIso(item.end_at ?? item.start_at);
             if (time && time > limit) {
-              pushConstraintResult(constraint, `item ${item.item_id} ends at ${time}, after ${limit}.`, result);
+              pushConstraintResult(
+                constraint,
+                `item ${item.item_id} ends at ${time}, after ${limit}.`,
+                result
+              );
             }
           }
         }
@@ -534,7 +614,11 @@ export class ProposalService {
           for (const item of scopedItems) {
             const time = hhmmFromIso(item.start_at);
             if (time && time < limit) {
-              pushConstraintResult(constraint, `item ${item.item_id} starts at ${time}, before ${limit}.`, result);
+              pushConstraintResult(
+                constraint,
+                `item ${item.item_id} starts at ${time}, before ${limit}.`,
+                result
+              );
             }
           }
         }
@@ -559,9 +643,15 @@ export class ProposalService {
         if (constraint.type === 'max_places_per_day') {
           const max = asNumber(constraint.parameters.max ?? constraint.parameters.count);
           if (max === undefined) continue;
-          const count = scopedItems.filter((item) => item.type === 'place' || item.type === 'meal').length;
+          const count = scopedItems.filter(
+            (item) => item.type === 'place' || item.type === 'meal'
+          ).length;
           if (count > max) {
-            pushConstraintResult(constraint, `${day.date} has ${count} places/meals, above limit ${max}.`, result);
+            pushConstraintResult(
+              constraint,
+              `${day.date} has ${count} places/meals, above limit ${max}.`,
+              result
+            );
           }
         }
 
@@ -572,7 +662,8 @@ export class ProposalService {
           if (maxKm === undefined) continue;
           const walkingKm =
             scopedItems.reduce(
-              (sum, item) => sum + (item.route?.mode === 'walking' ? item.route.distance_meters : 0),
+              (sum, item) =>
+                sum + (item.route?.mode === 'walking' ? item.route.distance_meters : 0),
               0
             ) / 1000;
           if (walkingKm > maxKm) {
@@ -590,6 +681,7 @@ export class ProposalService {
           if (max === undefined || !currency) continue;
           let total = 0;
           let incompatibleCurrency = false;
+
           for (const item of scopedItems) {
             if (item.place_id) {
               const cost = this.db.getPlace(item.place_id)?.planning?.estimated_cost;
@@ -606,6 +698,7 @@ export class ProposalService {
               }
             }
           }
+
           if (incompatibleCurrency) {
             result.soft_constraint_warnings.push(
               `${constraint.type} (${constraint.constraint_id}): mixed currencies prevent a complete budget check.`
@@ -638,7 +731,11 @@ export class ProposalService {
     }
   }
 
-  private applyTripItemOperation(trip: Trip, operation: ChangeOperation, enforceLocks: boolean): void {
+  private applyTripItemOperation(
+    trip: Trip,
+    operation: ChangeOperation,
+    enforceLocks: boolean
+  ): void {
     if (operation.target_type !== 'trip_item') {
       throw new Error('Only trip_item mutations are supported in the MVP.');
     }
@@ -646,10 +743,14 @@ export class ProposalService {
     if (operation.operation === 'add') {
       const date = asString(operation.to?.date);
       const item = operation.to?.item;
-      if (!date || !isTripItem(item)) throw new Error('Add requires to.date and a valid to.item.');
+      if (!date || !isTripItem(item)) {
+        throw new Error('Add requires to.date and a valid to.item.');
+      }
       const day = trip.days.find((candidate) => candidate.date === date);
       if (!day) throw new Error(`Trip day not found: ${date}`);
-      if (findTripItem(trip, item.item_id)) throw new Error(`Trip item already exists: ${item.item_id}`);
+      if (findTripItem(trip, item.item_id)) {
+        throw new Error(`Trip item already exists: ${item.item_id}`);
+      }
       day.items.push(structuredClone(item));
       return;
     }
@@ -657,10 +758,14 @@ export class ProposalService {
     if (!operation.target_id) throw new Error('target_id is required.');
     const located = findTripItem(trip, operation.target_id);
     if (!located) throw new Error(`Trip item not found: ${operation.target_id}`);
-    if (enforceLocks && located.item.locked) throw new Error(`Trip item is locked: ${operation.target_id}`);
+    if (enforceLocks && located.item.locked) {
+      throw new Error(`Trip item is locked: ${operation.target_id}`);
+    }
 
     if (operation.operation === 'remove') {
-      located.day.items = located.day.items.filter((item) => item.item_id !== operation.target_id);
+      located.day.items = located.day.items.filter(
+        (item) => item.item_id !== operation.target_id
+      );
       return;
     }
 
@@ -668,7 +773,9 @@ export class ProposalService {
       const targetDate = asString(operation.to?.date) ?? located.day.date;
       const targetDay = trip.days.find((day) => day.date === targetDate);
       if (!targetDay) throw new Error(`Trip day not found: ${targetDate}`);
-      located.day.items = located.day.items.filter((item) => item.item_id !== operation.target_id);
+      located.day.items = located.day.items.filter(
+        (item) => item.item_id !== operation.target_id
+      );
       const startAt = asString(operation.to?.start_at);
       const endAt = asString(operation.to?.end_at);
       const moved: TripItem = {
@@ -690,7 +797,19 @@ export class ProposalService {
       return;
     }
 
-    throw new Error(`Operation ${operation.operation} is not supported in the MVP apply path.`);
+    throw new Error(`Operation ${operation.operation} is not supported in the safe apply path.`);
+  }
+
+  private requireProposal(proposalId: string): ChangeProposal {
+    const proposal = this.db.getProposal(proposalId);
+    if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
+    return proposal;
+  }
+
+  private requireTrip(tripId: string): Trip {
+    const trip = this.db.getTrip(tripId);
+    if (!trip) throw new Error(`Trip not found: ${tripId}`);
+    return trip;
   }
 
   private audit(
