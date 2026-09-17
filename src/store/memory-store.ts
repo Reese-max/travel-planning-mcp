@@ -1,0 +1,89 @@
+import type { ChangeProposal, Constraint, Place, Reservation, Trip } from '../domain/types.js';
+import { seedConstraints, seedPlaces, seedProposals, seedReservations, seedTrip } from '../data/seed.js';
+
+function copy<T>(value: T): T {
+  return structuredClone(value);
+}
+
+export class MemoryStore {
+  private readonly trips = new Map<string, Trip>();
+  private readonly tripVersions = new Map<string, Map<number, Trip>>();
+  private readonly places = new Map<string, Place>();
+  private readonly reservations = new Map<string, Reservation>();
+  private readonly constraints = new Map<string, Constraint>();
+  private readonly proposals = new Map<string, ChangeProposal>();
+
+  constructor() {
+    for (const place of seedPlaces) this.places.set(place.place_id, copy(place));
+    for (const reservation of seedReservations) this.reservations.set(reservation.reservation_id, copy(reservation));
+    for (const constraint of seedConstraints) this.constraints.set(constraint.constraint_id, copy(constraint));
+    for (const proposal of seedProposals) this.proposals.set(proposal.proposal_id, copy(proposal));
+    this.saveTrip(seedTrip, false);
+  }
+
+  getTrip(tripId: string, version?: number): Trip | undefined {
+    if (version !== undefined) {
+      const historic = this.tripVersions.get(tripId)?.get(version);
+      return historic ? copy(historic) : undefined;
+    }
+    const trip = this.trips.get(tripId);
+    return trip ? copy(trip) : undefined;
+  }
+
+  saveTrip(trip: Trip, replaceCurrent = true): void {
+    const snapshot = copy(trip);
+    let versions = this.tripVersions.get(trip.trip_id);
+    if (!versions) {
+      versions = new Map<number, Trip>();
+      this.tripVersions.set(trip.trip_id, versions);
+    }
+    versions.set(trip.version, snapshot);
+    if (replaceCurrent || !this.trips.has(trip.trip_id)) {
+      this.trips.set(trip.trip_id, snapshot);
+    }
+  }
+
+  listTripVersions(tripId: string): number[] {
+    return [...(this.tripVersions.get(tripId)?.keys() ?? [])].sort((a, b) => a - b);
+  }
+
+  getPlace(placeId: string): Place | undefined {
+    const value = this.places.get(placeId);
+    return value ? copy(value) : undefined;
+  }
+
+  getReservation(reservationId: string): Reservation | undefined {
+    const value = this.reservations.get(reservationId);
+    return value ? copy(value) : undefined;
+  }
+
+  getConstraintsForTrip(trip: Trip): Constraint[] {
+    return (trip.constraint_ids ?? [])
+      .map((id) => this.constraints.get(id))
+      .filter((value): value is Constraint => value !== undefined)
+      .map(copy);
+  }
+
+  getProposal(proposalId: string): ChangeProposal | undefined {
+    const value = this.proposals.get(proposalId);
+    return value ? copy(value) : undefined;
+  }
+
+  saveProposal(proposal: ChangeProposal): void {
+    this.proposals.set(proposal.proposal_id, copy(proposal));
+  }
+
+  setProposalStatus(
+    proposalId: string,
+    status: ChangeProposal['status'],
+    extra: Partial<Pick<ChangeProposal, 'approved_at' | 'applied_at' | 'applied_trip_version'>> = {}
+  ): ChangeProposal | undefined {
+    const proposal = this.proposals.get(proposalId);
+    if (!proposal) return undefined;
+    const updated: ChangeProposal = { ...proposal, status, ...extra };
+    this.proposals.set(proposalId, copy(updated));
+    return copy(updated);
+  }
+}
+
+export const store = new MemoryStore();
