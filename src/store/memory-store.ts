@@ -74,6 +74,10 @@ export class MemoryStore implements TravelStore {
     return value ? copy(value) : undefined;
   }
 
+  savePlace(place: Place): void {
+    this.places.set(place.place_id, copy(place));
+  }
+
   searchPlaces(query: string, limit = 10): Place[] {
     const normalized = query.trim().toLocaleLowerCase();
     if (!normalized) return [];
