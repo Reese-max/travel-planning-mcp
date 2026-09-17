@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { placeProvider } from '../adapters/demo-place-provider.js';
 import type { ChangeOperation, TransportMode } from '../domain/types.js';
 import { proposalService } from '../services/proposal-service.js';
 import { routeService } from '../services/route-service.js';
@@ -33,8 +34,21 @@ const operationSchema = z.object({
 export function createServer(): McpServer {
   const server = new McpServer({
     name: 'travel-planning-mcp',
-    version: '0.2.0'
+    version: '0.3.0'
   });
+
+  server.registerTool(
+    'get_provider_status',
+    {
+      description: 'Describe the configured place and route providers so AI clients can distinguish demo estimates from live data.',
+      inputSchema: {}
+    },
+    async () =>
+      result({
+        places: placeProvider.descriptor,
+        routes: routeService.descriptor
+      })
+  );
 
   server.registerTool(
     'list_trips',
@@ -93,11 +107,11 @@ export function createServer(): McpServer {
   server.registerTool(
     'get_place',
     {
-      description: 'Read one normalized place by canonical place ID.',
+      description: 'Read one normalized place through the configured PlaceProvider.',
       inputSchema: { place_id: z.string().uuid() }
     },
     async ({ place_id }) => {
-      const place = store.getPlace(place_id);
+      const place = await placeProvider.get(place_id);
       return place ? result(place) : failure(`Place not found: ${place_id}`);
     }
   );
@@ -105,13 +119,13 @@ export function createServer(): McpServer {
   server.registerTool(
     'search_places',
     {
-      description: 'Search the currently configured place adapter. The bootstrap project ships only with local demo data.',
+      description: 'Search the configured PlaceProvider. Provider metadata is included so clients can distinguish demo vs live data.',
       inputSchema: {
         query: z.string().min(1),
         limit: z.number().int().min(1).max(25).default(10)
       }
     },
-    async ({ query, limit }) => result({ places: store.searchPlaces(query, limit), provider: 'demo-local' })
+    async ({ query, limit }) => result(await placeProvider.search({ query, limit }))
   );
 
   server.registerTool(
@@ -151,7 +165,7 @@ export function createServer(): McpServer {
   server.registerTool(
     'calculate_route',
     {
-      description: 'Calculate a route through the configured route adapter. Bootstrap mode returns an explicitly labeled estimate, not live routing data.',
+      description: 'Calculate a route through the configured RouteProvider. Provider metadata/source must be inspected before treating the result as live data.',
       inputSchema: {
         from_place_id: z.string().uuid(),
         to_place_id: z.string().uuid(),
@@ -160,7 +174,7 @@ export function createServer(): McpServer {
     },
     async ({ from_place_id, to_place_id, mode }) => {
       try {
-        return result(routeService.estimate(from_place_id, to_place_id, mode as TransportMode));
+        return result(await routeService.estimate(from_place_id, to_place_id, mode as TransportMode));
       } catch (error) {
         return failure(error);
       }
