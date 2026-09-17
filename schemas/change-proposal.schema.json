@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://travel-planning-mcp.dev/schemas/change-proposal.schema.json",
+  "title": "ChangeProposal",
+  "type": "object",
+  "required": [
+    "proposal_id",
+    "trip_id",
+    "base_trip_version",
+    "status",
+    "operations",
+    "generated_by",
+    "created_at"
+  ],
+  "properties": {
+    "proposal_id": { "type": "string", "format": "uuid" },
+    "trip_id": { "type": "string", "format": "uuid" },
+    "base_trip_version": { "type": "integer", "minimum": 1 },
+    "status": {
+      "enum": ["draft", "validating", "validated", "needs_review", "approved", "rejected", "applied", "expired"]
+    },
+    "title": { "type": ["string", "null"] },
+    "summary": { "type": ["string", "null"] },
+    "reason": { "type": ["string", "null"] },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["operation_id", "operation", "target_type"],
+        "properties": {
+          "operation_id": { "type": "string", "format": "uuid" },
+          "operation": { "enum": ["add", "remove", "move", "update", "replace"] },
+          "target_type": { "enum": ["trip_item", "place", "reservation", "constraint"] },
+          "target_id": { "type": ["string", "null"] },
+          "from": { "type": ["object", "null"], "additionalProperties": true },
+          "to": { "type": ["object", "null"], "additionalProperties": true },
+          "reason": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "validation": {
+      "type": ["object", "null"],
+      "properties": {
+        "valid": { "type": "boolean" },
+        "validated_at": { "type": ["string", "null"], "format": "date-time" },
+        "hard_constraint_violations": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "soft_constraint_warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "conflicts": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["valid", "hard_constraint_violations", "soft_constraint_warnings", "conflicts"],
+      "additionalProperties": false
+    },
+    "impact": {
+      "type": ["object", "null"],
+      "properties": {
+        "travel_minutes_delta": { "type": ["integer", "null"] },
+        "walking_km_delta": { "type": ["number", "null"] },
+        "estimated_cost_delta": { "type": ["number", "null"] },
+        "currency": { "type": ["string", "null"], "pattern": "^[A-Z]{3}$" },
+        "affected_days": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "format": "date" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "generated_by": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["user", "ai", "system"] },
+        "model": { "type": ["string", "null"] },
+        "actor_id": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "approved_at": { "type": ["string", "null"], "format": "date-time" },
+    "applied_at": { "type": ["string", "null"], "format": "date-time" },
+    "applied_trip_version": { "type": ["integer", "null"], "minimum": 1 }
+  },
+  "additionalProperties": false
+}
