@@ -19,23 +19,41 @@
 - [x] Add proposal lifecycle and rollback audit events.
 - [x] Add schedule-overlap validation.
 - [x] Add conservative unsupported-hard-constraint handling.
+- [x] Add provider-status discovery (`live` vs demo/estimated).
+- [x] Add request idempotency for retry-sensitive writes.
+- [x] Require idempotency for apply and rollback.
+- [x] Serialize concurrent same-key requests inside one process.
+- [x] Re-evaluate proposals at approval and immediately before apply.
+- [x] Reject fixed-reservation add/rebind bypasses.
+- [x] Add fixed-reservation invariants at the persistence boundary.
 - [ ] Add JSON Schema validation at persistence/API boundaries.
-- [ ] Add idempotency keys for proposal/apply/rollback writes.
 - [ ] Add request correlation IDs and structured logs.
 
-## Phase 2 — Durable identity and persistence
+## Phase 2 — Persistence and provider boundaries
 
+- [x] Define `TravelStore` persistence port.
+- [x] Make `MemoryStore` implement `TravelStore`.
+- [x] Define normalized `PlaceProvider` port.
+- [x] Define normalized `RouteProvider` port.
+- [x] Wrap demo place and route data in explicit provider adapters.
 - [ ] Add PostgreSQL persistence and immutable trip version history.
+- [ ] Enforce durable unique `(idempotency_scope, idempotency_key)` constraints.
 - [ ] Wrap proposal apply/rollback in database transactions.
+- [ ] Persist approval receipts and audit events durably.
 - [ ] Add authenticated users and per-trip ownership/ACLs.
 - [ ] Replace shared API keys with scoped OAuth/service identities.
-- [ ] Persist approval receipts and audit events durably.
 - [ ] Add data retention/deletion support for itinerary and imported booking data.
 
 ## Phase 3 — Real travel context adapters
 
-- [ ] Google Places adapter.
-- [ ] Google Routes / route-matrix adapter.
+Highest-priority next adapters:
+
+- [ ] Google Places adapter behind `PlaceProvider`.
+- [ ] Google Routes adapter behind `RouteProvider`.
+- [ ] Route-matrix support for optimization.
+
+Then:
+
 - [ ] Weather adapter.
 - [ ] TDX / GTFS transit adapters.
 - [ ] OSM POI adapter.
@@ -43,7 +61,7 @@
 - [ ] Calendar reservation import.
 - [ ] Email booking extraction.
 
-All adapters must retain source, retrieval time, and freshness metadata. Estimated data must never be presented as live provider data.
+All adapters must retain source, retrieval/calculation time, and freshness metadata. Estimated data must never be presented as live provider data.
 
 ## Phase 4 — Constraint-aware planner
 

@@ -1,7 +1,7 @@
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createHttpServer } from '../src/http/server.js';
 import { demoTripId } from '../src/data/seed.js';
+import { createHttpServer } from '../src/http/server.js';
 
 const READ_KEY = 'test-read-key';
 const APPROVAL_KEY = 'test-approval-key';
@@ -48,7 +48,14 @@ describe('Travel Planning REST API', () => {
   it('exposes an unauthenticated health endpoint but protects travel data', async () => {
     const health = await fetch(`${baseUrl}/health`);
     expect(health.status).toBe(200);
-    expect(await health.json()).toMatchObject({ ok: true, approval_enabled: true });
+    expect(await health.json()).toMatchObject({
+      ok: true,
+      approval_enabled: true,
+      providers: {
+        places: { id: 'demo-local', live: false },
+        routes: { id: 'demo-haversine-estimate', live: false }
+      }
+    });
 
     const unauthorized = await fetch(`${baseUrl}/v1/trips`);
     expect(unauthorized.status).toBe(401);
@@ -74,7 +81,14 @@ describe('Travel Planning REST API', () => {
     expect(body.constraints.length).toBeGreaterThan(0);
   });
 
-  it('exposes normalized place, reservation, constraint, and route context', async () => {
+  it('exposes normalized provider, place, reservation, constraint, and route context', async () => {
+    const providers = await authorizedFetch('/v1/providers');
+    expect(providers.status).toBe(200);
+    expect(await providers.json()).toMatchObject({
+      places: { id: 'demo-local', live: false },
+      routes: { id: 'demo-haversine-estimate', live: false }
+    });
+
     const constraints = await authorizedFetch(`/v1/trips/${demoTripId}/constraints`);
     expect(constraints.status).toBe(200);
     expect((await constraints.json()) as { constraints: unknown[] }).toMatchObject({
@@ -84,10 +98,10 @@ describe('Travel Planning REST API', () => {
     const search = await authorizedFetch('/v1/places/search?q=Tokyo&limit=5');
     expect(search.status).toBe(200);
     const searchBody = (await search.json()) as {
-      provider: string;
+      provider: { id: string; live: boolean };
       places: Array<{ place_id: string }>;
     };
-    expect(searchBody.provider).toBe('demo-local');
+    expect(searchBody.provider).toMatchObject({ id: 'demo-local', live: false });
     expect(searchBody.places.some((place) => place.place_id === TOKYO_STATION_ID)).toBe(true);
 
     const place = await authorizedFetch(`/v1/places/${SENSOJI_ID}`);
@@ -115,9 +129,10 @@ describe('Travel Planning REST API', () => {
     });
   });
 
-  it('keeps approval behind a separate operator credential', async () => {
+  it('keeps approval behind a separate operator credential and replays apply safely', async () => {
     const create = await authorizedFetch(`/v1/trips/${demoTripId}/proposals`, {
       method: 'POST',
+      headers: { 'idempotency-key': 'create-http-approval-test' },
       body: JSON.stringify({
         actor_id: 'http-test-agent',
         operations: [
@@ -131,6 +146,7 @@ describe('Travel Planning REST API', () => {
       })
     });
     expect(create.status).toBe(201);
+    expect(create.headers.get('idempotent-replayed')).toBe('false');
     const proposal = (await create.json()) as { proposal_id: string };
 
     const validate = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}/validate`, {
@@ -148,7 +164,10 @@ describe('Travel Planning REST API', () => {
 
     const approve = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}/approve`, {
       method: 'POST',
-      headers: { 'x-approval-key': APPROVAL_KEY },
+      headers: {
+        'x-approval-key': APPROVAL_KEY,
+        'idempotency-key': 'approve-http-approval-test'
+      },
       body: JSON.stringify({ actor_id: 'reviewer', note: 'Reviewed in test.' })
     });
     expect(approve.status).toBe(200);
@@ -158,5 +177,38 @@ describe('Travel Planning REST API', () => {
     };
     expect(approved.status).toBe('approved');
     expect(approved.approval).toMatchObject({ actor_id: 'reviewer', channel: 'http' });
+
+    const missingIdempotency = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}/apply`, {
+      method: 'POST',
+      headers: { 'x-approval-key': APPROVAL_KEY },
+      body: '{}'
+    });
+    expect(missingIdempotency.status).toBe(400);
+    expect(await missingIdempotency.json()).toMatchObject({ error: 'idempotency_key_required' });
+
+    const apply = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}/apply`, {
+      method: 'POST',
+      headers: {
+        'x-approval-key': APPROVAL_KEY,
+        'idempotency-key': 'apply-http-approval-test'
+      },
+      body: '{}'
+    });
+    expect(apply.status).toBe(200);
+    expect(apply.headers.get('idempotent-replayed')).toBe('false');
+    const firstApplied = (await apply.json()) as { trip: { version: number } };
+
+    const replay = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}/apply`, {
+      method: 'POST',
+      headers: {
+        'x-approval-key': APPROVAL_KEY,
+        'idempotency-key': 'apply-http-approval-test'
+      },
+      body: '{}'
+    });
+    expect(replay.status).toBe(200);
+    expect(replay.headers.get('idempotent-replayed')).toBe('true');
+    const replayed = (await replay.json()) as { trip: { version: number } };
+    expect(replayed.trip.version).toBe(firstApplied.trip.version);
   });
 });

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { demoTripId } from '../src/data/seed.js';
 import { ProposalService } from '../src/services/proposal-service.js';
 import { MemoryStore } from '../src/store/memory-store.js';
-import { demoTripId } from '../src/data/seed.js';
 
 const FLIGHT_ITEM_ID = '77777777-7777-4777-8777-777777777777';
+const FLIGHT_RESERVATION_ID = '44444444-4444-4444-8444-444444444444';
 const SENSOJI_ITEM_ID = '88888888-8888-4888-8888-888888888888';
 
 function safeMove(service: ProposalService) {
@@ -48,6 +49,39 @@ describe('ProposalService', () => {
     expect(validated.status).toBe('needs_review');
     expect(validated.validation?.valid).toBe(false);
     expect(validated.validation?.hard_constraint_violations.length).toBeGreaterThan(0);
+  });
+
+  it('rejects AI attempts to add or rebind a fixed reservation as a new unlocked item', () => {
+    const db = new MemoryStore();
+    const service = new ProposalService(db);
+    const proposal = service.create({
+      tripId: demoTripId,
+      operations: [
+        {
+          operation: 'add',
+          target_type: 'trip_item',
+          to: {
+            date: '2026-10-20',
+            item: {
+              item_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+              type: 'reservation',
+              reservation_id: FLIGHT_RESERVATION_ID,
+              title: 'Injected flight reference',
+              start_at: '2026-10-20T18:00:00+09:00',
+              end_at: '2026-10-20T19:00:00+09:00',
+              locked: false
+            }
+          }
+        }
+      ]
+    });
+
+    const validated = service.validate(proposal.proposal_id);
+    expect(validated.status).toBe('needs_review');
+    expect(validated.validation?.valid).toBe(false);
+    expect(validated.validation?.hard_constraint_violations.join(' ')).toContain(
+      'cannot add/rebind fixed reservation'
+    );
   });
 
   it('validates a safe move without modifying the canonical trip', () => {

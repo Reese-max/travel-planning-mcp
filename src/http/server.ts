@@ -1,7 +1,9 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { z } from 'zod';
+import { placeProvider } from '../adapters/demo-place-provider.js';
 import type { ChangeOperation, TransportMode } from '../domain/types.js';
+import { idempotencyService, IdempotencyConflictError } from '../services/idempotency-service.js';
 import { proposalService } from '../services/proposal-service.js';
 import { routeService } from '../services/route-service.js';
 import { tripContextService } from '../services/trip-context-service.js';
@@ -65,6 +67,16 @@ function bearerToken(req: IncomingMessage): string | undefined {
   return value.slice('Bearer '.length);
 }
 
+function stringHeader(req: IncomingMessage, name: string): string | undefined {
+  const value = req.headers[name.toLowerCase()];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function idempotencyKey(req: IncomingMessage): string | undefined {
+  const value = stringHeader(req, 'idempotency-key')?.trim();
+  return value || undefined;
+}
+
 function secureEqual(left: string | undefined, right: string | undefined): boolean {
   if (!left || !right) return false;
   const a = Buffer.from(left);
@@ -72,19 +84,29 @@ function secureEqual(left: string | undefined, right: string | undefined): boole
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function approvalHeader(req: IncomingMessage): string | undefined {
-  const value = req.headers['x-approval-key'];
-  return typeof value === 'string' ? value : undefined;
-}
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
+function sendJson(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {}
+): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(payload),
-    'cache-control': 'no-store'
+    'cache-control': 'no-store',
+    ...headers
   });
   res.end(payload);
+}
+
+function sendIdempotent(
+  res: ServerResponse,
+  result: { status: number; body: unknown; replayed: boolean }
+): void {
+  sendJson(res, result.status, result.body, {
+    'idempotent-replayed': result.replayed ? 'true' : 'false'
+  });
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -111,6 +133,7 @@ function parsePositiveInt(value: string | null): number | undefined {
 }
 
 function errorStatus(error: unknown): number {
+  if (error instanceof IdempotencyConflictError) return 409;
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes('not found') || message.includes('not found:')) return 404;
   if (
@@ -119,7 +142,8 @@ function errorStatus(error: unknown): number {
     message.includes('validated') ||
     message.includes('locked') ||
     message.includes('fixed') ||
-    message.includes('approval receipt')
+    message.includes('approval receipt') ||
+    message.includes('Idempotency key')
   ) {
     return 409;
   }
@@ -148,11 +172,20 @@ function requireApproval(
     sendJson(res, 503, { error: 'approval_api_disabled' });
     return false;
   }
-  if (!secureEqual(approvalHeader(req), approvalApiKey)) {
+  if (!secureEqual(stringHeader(req, 'x-approval-key'), approvalApiKey)) {
     sendJson(res, 401, { error: 'approval_unauthorized' });
     return false;
   }
   return true;
+}
+
+function requireIdempotencyKey(req: IncomingMessage, res: ServerResponse): string | undefined {
+  const key = idempotencyKey(req);
+  if (!key) {
+    sendJson(res, 400, { error: 'idempotency_key_required' });
+    return undefined;
+  }
+  return key;
 }
 
 export function createHttpServer(options: HttpServerOptions = {}) {
@@ -175,14 +208,26 @@ export function createHttpServer(options: HttpServerOptions = {}) {
         sendJson(res, 200, {
           ok: true,
           service: 'travel-planning-api',
-          version: '0.2.0',
-          approval_enabled: Boolean(approvalApiKey)
+          version: '0.3.0',
+          approval_enabled: Boolean(approvalApiKey),
+          providers: {
+            places: placeProvider.descriptor,
+            routes: routeService.descriptor
+          }
         });
         return;
       }
 
       if (travelApiKey && !secureEqual(bearerToken(req), travelApiKey)) {
         sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+
+      if (method === 'GET' && url.pathname === '/v1/providers') {
+        sendJson(res, 200, {
+          places: placeProvider.descriptor,
+          routes: routeService.descriptor
+        });
         return;
       }
 
@@ -215,12 +260,12 @@ export function createHttpServer(options: HttpServerOptions = {}) {
           sendJson(res, 400, { error: 'limit must be an integer from 1 to 25' });
           return;
         }
-        sendJson(res, 200, { places: store.searchPlaces(query, limit), provider: 'demo-local' });
+        sendJson(res, 200, await placeProvider.search({ query, limit }));
         return;
       }
 
       if (segments[0] === 'v1' && segments[1] === 'places' && segments[2] && segments.length === 3) {
-        const place = store.getPlace(segments[2]);
+        const place = await placeProvider.get(segments[2]);
         if (!place) {
           sendJson(res, 404, { error: 'place_not_found' });
           return;
@@ -250,7 +295,7 @@ export function createHttpServer(options: HttpServerOptions = {}) {
         sendJson(
           res,
           200,
-          routeService.estimate(body.from_place_id, body.to_place_id, body.mode as TransportMode)
+          await routeService.estimate(body.from_place_id, body.to_place_id, body.mode as TransportMode)
         );
         return;
       }
@@ -306,23 +351,42 @@ export function createHttpServer(options: HttpServerOptions = {}) {
 
         if (method === 'POST' && segments[3] === 'proposals' && segments.length === 4) {
           const body = createProposalSchema.parse(await readJson(req));
-          const proposal = proposalService.create({
-            tripId,
-            operations: normalizedOperations(body.operations),
-            ...(body.title !== undefined ? { title: body.title } : {}),
-            ...(body.summary !== undefined ? { summary: body.summary } : {}),
-            ...(body.reason !== undefined ? { reason: body.reason } : {}),
-            ...(body.model !== undefined ? { model: body.model } : {}),
-            ...(body.actor_id !== undefined ? { actorId: body.actor_id } : {})
-          });
-          sendJson(res, 201, proposal);
+          const outcome = await idempotencyService.execute(
+            `create-proposal:${tripId}`,
+            idempotencyKey(req),
+            body,
+            () => ({
+              status: 201,
+              body: proposalService.create({
+                tripId,
+                operations: normalizedOperations(body.operations),
+                ...(body.title !== undefined ? { title: body.title } : {}),
+                ...(body.summary !== undefined ? { summary: body.summary } : {}),
+                ...(body.reason !== undefined ? { reason: body.reason } : {}),
+                ...(body.model !== undefined ? { model: body.model } : {}),
+                ...(body.actor_id !== undefined ? { actorId: body.actor_id } : {})
+              })
+            })
+          );
+          sendIdempotent(res, outcome);
           return;
         }
 
         if (method === 'POST' && segments[3] === 'rollback' && segments.length === 4) {
           if (!requireApproval(req, res, approvalApiKey)) return;
+          const key = requireIdempotencyKey(req, res);
+          if (!key) return;
           const body = rollbackSchema.parse(await readJson(req));
-          sendJson(res, 200, proposalService.rollback(tripId, body.target_version, body.actor_id));
+          const outcome = await idempotencyService.execute(
+            `rollback-trip:${tripId}`,
+            key,
+            body,
+            () => ({
+              status: 200,
+              body: proposalService.rollback(tripId, body.target_version, body.actor_id)
+            })
+          );
+          sendIdempotent(res, outcome);
           return;
         }
       }
@@ -354,26 +418,48 @@ export function createHttpServer(options: HttpServerOptions = {}) {
 
           if (segments[3] === 'approve') {
             const body = approveSchema.parse(await readJson(req));
-            sendJson(
-              res,
-              200,
-              proposalService.approve({
-                proposalId,
-                actorId: body.actor_id,
-                channel: 'http',
-                ...(body.note !== undefined ? { note: body.note } : {})
+            const outcome = await idempotencyService.execute(
+              `approve-proposal:${proposalId}`,
+              idempotencyKey(req),
+              body,
+              () => ({
+                status: 200,
+                body: proposalService.approve({
+                  proposalId,
+                  actorId: body.actor_id,
+                  channel: 'http',
+                  ...(body.note !== undefined ? { note: body.note } : {})
+                })
               })
             );
+            sendIdempotent(res, outcome);
             return;
           }
 
           if (segments[3] === 'reject') {
             const body = rejectSchema.parse(await readJson(req));
-            sendJson(res, 200, proposalService.reject(proposalId, body.actor_id, body.reason));
+            const outcome = await idempotencyService.execute(
+              `reject-proposal:${proposalId}`,
+              idempotencyKey(req),
+              body,
+              () => ({
+                status: 200,
+                body: proposalService.reject(proposalId, body.actor_id, body.reason)
+              })
+            );
+            sendIdempotent(res, outcome);
             return;
           }
 
-          sendJson(res, 200, proposalService.apply(proposalId));
+          const key = requireIdempotencyKey(req, res);
+          if (!key) return;
+          const outcome = await idempotencyService.execute(
+            `apply-proposal:${proposalId}`,
+            key,
+            { proposal_id: proposalId },
+            () => ({ status: 200, body: proposalService.apply(proposalId) })
+          );
+          sendIdempotent(res, outcome);
           return;
         }
       }

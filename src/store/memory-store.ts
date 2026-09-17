@@ -8,12 +8,17 @@ import type {
   Trip
 } from '../domain/types.js';
 import { seedConstraints, seedPlaces, seedProposals, seedReservations, seedTrip } from '../data/seed.js';
+import type { IdempotencyRecord, TravelStore } from '../ports/travel-store.js';
 
 function copy<T>(value: T): T {
   return structuredClone(value);
 }
 
-export class MemoryStore {
+function idempotencyMapKey(scope: string, key: string): string {
+  return `${scope}\u0000${key}`;
+}
+
+export class MemoryStore implements TravelStore {
   private readonly trips = new Map<string, Trip>();
   private readonly tripVersions = new Map<string, Map<number, Trip>>();
   private readonly places = new Map<string, Place>();
@@ -21,6 +26,7 @@ export class MemoryStore {
   private readonly constraints = new Map<string, Constraint>();
   private readonly proposals = new Map<string, ChangeProposal>();
   private readonly auditEvents: AuditEvent[] = [];
+  private readonly idempotency = new Map<string, IdempotencyRecord>();
 
   constructor() {
     for (const place of seedPlaces) this.places.set(place.place_id, copy(place));
@@ -46,6 +52,7 @@ export class MemoryStore {
   }
 
   saveTrip(trip: Trip, replaceCurrent = true): void {
+    this.assertTripInvariants(trip);
     const snapshot = copy(trip);
     let versions = this.tripVersions.get(trip.trip_id);
     if (!versions) {
@@ -141,6 +148,46 @@ export class MemoryStore {
       .filter((event) => event.trip_id === tripId)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
       .map(copy);
+  }
+
+  getIdempotency(scope: string, key: string): IdempotencyRecord | undefined {
+    const value = this.idempotency.get(idempotencyMapKey(scope, key));
+    return value ? copy(value) : undefined;
+  }
+
+  saveIdempotency(record: IdempotencyRecord): void {
+    this.idempotency.set(idempotencyMapKey(record.scope, record.key), copy(record));
+  }
+
+  private assertTripInvariants(trip: Trip): void {
+    for (const day of trip.days) {
+      for (const item of day.items) {
+        if (!item.reservation_id) continue;
+        const reservation = this.reservations.get(item.reservation_id);
+        if (!reservation) {
+          throw new Error(
+            `Trip item ${item.item_id} references unknown reservation ${item.reservation_id}.`
+          );
+        }
+
+        if (!reservation.fixed) continue;
+        if (!item.locked) {
+          throw new Error(
+            `Trip item ${item.item_id} references fixed reservation ${reservation.reservation_id} but is not locked.`
+          );
+        }
+        if (item.start_at !== reservation.start_at) {
+          throw new Error(
+            `Trip item ${item.item_id} cannot change start time of fixed reservation ${reservation.reservation_id}.`
+          );
+        }
+        if ((item.end_at ?? null) !== (reservation.end_at ?? null)) {
+          throw new Error(
+            `Trip item ${item.item_id} cannot change end time of fixed reservation ${reservation.reservation_id}.`
+          );
+        }
+      }
+    }
   }
 }
 

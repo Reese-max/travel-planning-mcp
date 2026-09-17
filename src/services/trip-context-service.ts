@@ -1,5 +1,6 @@
 import type { Constraint, Place, Reservation, Trip } from '../domain/types.js';
-import { store, type MemoryStore } from '../store/memory-store.js';
+import type { TravelStore } from '../ports/travel-store.js';
+import { store } from '../store/memory-store.js';
 
 export interface TripContext {
   trip: Trip;
@@ -10,7 +11,7 @@ export interface TripContext {
 }
 
 export class TripContextService {
-  constructor(private readonly db: MemoryStore = store) {}
+  constructor(private readonly db: TravelStore = store) {}
 
   get(tripId: string, version?: number): TripContext {
     const trip = this.db.getTrip(tripId, version);
