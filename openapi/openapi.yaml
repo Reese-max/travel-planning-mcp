@@ -1,17 +1,33 @@
 openapi: 3.1.0
 info:
   title: Travel Planning API
-  version: 0.2.0
+  version: 0.3.0
   description: >-
     Canonical travel planning API used alongside the MCP server. AI-originated
     mutations become ChangeProposal objects. Approval/apply/rollback operations
-    are protected by a separate operator credential.
+    use a separate operator credential. Retry-sensitive writes support
+    Idempotency-Key and return Idempotent-Replayed when a stored response is replayed.
 servers:
   - url: http://127.0.0.1:8787/v1
     description: Default local development server
 security:
   - bearerAuth: []
 paths:
+  /providers:
+    get:
+      summary: Describe configured place and route providers
+      description: Use the live flag before treating place/route output as current provider data.
+      responses:
+        '200':
+          description: Provider descriptors
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [places, routes]
+                properties:
+                  places: { $ref: '#/components/schemas/ProviderDescriptor' }
+                  routes: { $ref: '#/components/schemas/ProviderDescriptor' }
   /trips:
     get:
       summary: List trips
@@ -114,36 +130,41 @@ paths:
       parameters:
         - $ref: '#/components/parameters/TripId'
       responses:
-        '200':
-          description: Audit events
+        '200': { description: Audit events }
         '404': { $ref: '#/components/responses/NotFound' }
   /trips/{tripId}/proposals:
     post:
       summary: Create a change proposal
-      description: Creates a draft bound to the current trip version. Does not mutate the trip.
+      description: >-
+        Creates a draft bound to the current trip version. Does not mutate the trip.
+        Idempotency-Key is optional but recommended for automatic clients.
       parameters:
         - $ref: '#/components/parameters/TripId'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/CreateProposalRequest'
+            schema: { $ref: '#/components/schemas/CreateProposalRequest' }
       responses:
         '201':
           description: Draft proposal
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
           content:
             application/json:
               schema: { $ref: '../schemas/change-proposal.schema.json' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
   /trips/{tripId}/rollback:
     post:
       summary: Restore an older snapshot as a new trip version
-      description: Requires both Bearer auth and X-Approval-Key.
+      description: Requires Bearer auth, X-Approval-Key, and Idempotency-Key.
       parameters:
         - $ref: '#/components/parameters/TripId'
         - $ref: '#/components/parameters/ApprovalKey'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -157,14 +178,17 @@ paths:
       responses:
         '200':
           description: New trip version restored from older snapshot
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
           content:
             application/json:
               schema: { $ref: '../schemas/trip.schema.json' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/ApprovalUnauthorized' }
         '409': { $ref: '#/components/responses/Conflict' }
   /places/search:
     get:
-      summary: Search the configured place adapter
+      summary: Search the configured PlaceProvider
       parameters:
         - name: q
           in: query
@@ -176,7 +200,17 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 25, default: 10 }
       responses:
         '200':
-          description: Normalized places and provider label
+          description: Normalized places plus provider descriptor
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [provider, places]
+                properties:
+                  provider: { $ref: '#/components/schemas/ProviderDescriptor' }
+                  places:
+                    type: array
+                    items: { $ref: '../schemas/place.schema.json' }
         '400': { $ref: '#/components/responses/BadRequest' }
   /places/{placeId}:
     get:
@@ -210,7 +244,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
   /routes/estimate:
     post:
-      summary: Calculate a route through the configured route adapter
+      summary: Calculate a route through the configured RouteProvider
       requestBody:
         required: true
         content:
@@ -221,11 +255,9 @@ paths:
               properties:
                 from_place_id: { type: string, format: uuid }
                 to_place_id: { type: string, format: uuid }
-                mode:
-                  enum: [walking, transit, rail, taxi, car, bike]
+                mode: { enum: [walking, transit, rail, taxi, car, bike] }
       responses:
-        '200':
-          description: Route result or explicitly labeled estimate
+        '200': { description: Route result with source and calculated_at metadata }
         '400': { $ref: '#/components/responses/BadRequest' }
   /proposals/{proposalId}:
     get:
@@ -254,10 +286,11 @@ paths:
   /proposals/{proposalId}/approve:
     post:
       summary: Human/operator approval of a validated proposal
-      description: Requires X-Approval-Key in addition to Bearer auth.
+      description: Requires X-Approval-Key. Idempotency-Key is optional but recommended.
       parameters:
         - $ref: '#/components/parameters/ProposalId'
         - $ref: '#/components/parameters/ApprovalKey'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -271,6 +304,8 @@ paths:
       responses:
         '200':
           description: Proposal with approval receipt
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
           content:
             application/json:
               schema: { $ref: '../schemas/change-proposal.schema.json' }
@@ -279,10 +314,11 @@ paths:
   /proposals/{proposalId}/reject:
     post:
       summary: Reject a proposal
-      description: Requires X-Approval-Key in addition to Bearer auth.
+      description: Requires X-Approval-Key. Idempotency-Key is optional but recommended.
       parameters:
         - $ref: '#/components/parameters/ProposalId'
         - $ref: '#/components/parameters/ApprovalKey'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -296,19 +332,26 @@ paths:
       responses:
         '200':
           description: Rejected proposal
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
           content:
             application/json:
               schema: { $ref: '../schemas/change-proposal.schema.json' }
   /proposals/{proposalId}/apply:
     post:
       summary: Apply an approved proposal
-      description: Requires X-Approval-Key and a stored approval receipt. Creates Trip vN+1.
+      description: >-
+        Requires X-Approval-Key, Idempotency-Key, a stored approval receipt, and
+        apply-time revalidation. Creates Trip vN+1 exactly once per idempotency scope/key.
       parameters:
         - $ref: '#/components/parameters/ProposalId'
         - $ref: '#/components/parameters/ApprovalKey'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
       responses:
         '200':
           description: Proposal and new trip version
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
           content:
             application/json:
               schema:
@@ -317,6 +360,7 @@ paths:
                 properties:
                   proposal: { $ref: '../schemas/change-proposal.schema.json' }
                   trip: { $ref: '../schemas/trip.schema.json' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/ApprovalUnauthorized' }
         '409': { $ref: '#/components/responses/Conflict' }
 components:
@@ -325,6 +369,10 @@ components:
       type: http
       scheme: bearer
       description: TRAVEL_API_KEY when configured. Required for non-loopback deployments.
+  headers:
+    IdempotentReplayed:
+      description: true when this response was replayed from a previous successful request.
+      schema: { type: string, enum: ['true', 'false'] }
   parameters:
     TripId:
       name: tripId
@@ -342,7 +390,24 @@ components:
       required: true
       schema: { type: string }
       description: Separate operator credential; never expose it to ordinary AI clients.
+    OptionalIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, minLength: 1, maxLength: 200 }
+    RequiredIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 200 }
   schemas:
+    ProviderDescriptor:
+      type: object
+      required: [id, live, description]
+      properties:
+        id: { type: string }
+        live: { type: boolean }
+        description: { type: string }
     CreateProposalRequest:
       type: object
       required: [operations]
@@ -359,10 +424,8 @@ components:
             type: object
             required: [operation, target_type]
             properties:
-              operation:
-                enum: [add, remove, move, update, replace]
-              target_type:
-                enum: [trip_item, place, reservation, constraint]
+              operation: { enum: [add, remove, move, update, replace] }
+              target_type: { enum: [trip_item, place, reservation, constraint] }
               target_id: { type: [string, 'null'] }
               from:
                 type: [object, 'null']
@@ -373,7 +436,7 @@ components:
               reason: { type: [string, 'null'] }
   responses:
     BadRequest:
-      description: Invalid request
+      description: Invalid request or missing required Idempotency-Key
     Unauthorized:
       description: Missing or invalid Bearer token
     ApprovalUnauthorized:
@@ -381,4 +444,6 @@ components:
     NotFound:
       description: Resource not found
     Conflict:
-      description: Invalid state, stale version, protected item, or approval conflict
+      description: Invalid state, stale version, protected item, approval conflict, or idempotency conflict
+    IdempotencyConflict:
+      description: The same Idempotency-Key was reused with a different request fingerprint
