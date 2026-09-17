@@ -1,6 +1,7 @@
 import type { PlaceProvider, PlaceSearchRequest, PlaceSearchResult } from '../ports/place-provider.js';
 import type { TravelStore } from '../ports/travel-store.js';
 import { store } from '../store/memory-store.js';
+import { GooglePlaceProvider } from './google-place-provider.js';
 
 export class DemoPlaceProvider implements PlaceProvider {
   readonly descriptor = {
@@ -23,4 +24,15 @@ export class DemoPlaceProvider implements PlaceProvider {
   }
 }
 
-export const placeProvider = new DemoPlaceProvider();
+function configuredPlaceProvider(): PlaceProvider {
+  const provider = (process.env.PLACE_PROVIDER ?? 'demo').toLowerCase();
+  if (provider === 'demo') return new DemoPlaceProvider();
+  if (provider === 'google') {
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) throw new Error('PLACE_PROVIDER=google requires GOOGLE_MAPS_API_KEY.');
+    return new GooglePlaceProvider(apiKey);
+  }
+  throw new Error(`Unsupported PLACE_PROVIDER: ${provider}`);
+}
+
+export const placeProvider = configuredPlaceProvider();
