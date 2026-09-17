@@ -1,8 +1,9 @@
-import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
+import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { z } from 'zod';
-import type { ChangeOperation } from '../domain/types.js';
+import type { ChangeOperation, TransportMode } from '../domain/types.js';
 import { proposalService } from '../services/proposal-service.js';
+import { routeService } from '../services/route-service.js';
 import { tripContextService } from '../services/trip-context-service.js';
 import { store } from '../store/memory-store.js';
 
@@ -24,6 +25,12 @@ const createProposalSchema = z.object({
   model: z.string().optional(),
   actor_id: z.string().optional(),
   operations: z.array(operationSchema).min(1)
+});
+
+const routeEstimateSchema = z.object({
+  from_place_id: z.string().uuid(),
+  to_place_id: z.string().uuid(),
+  mode: z.enum(['walking', 'transit', 'rail', 'taxi', 'car', 'bike'])
 });
 
 const approveSchema = z.object({
@@ -63,6 +70,11 @@ function secureEqual(left: string | undefined, right: string | undefined): boole
   const a = Buffer.from(left);
   const b = Buffer.from(right);
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function approvalHeader(req: IncomingMessage): string | undefined {
+  const value = req.headers['x-approval-key'];
+  return typeof value === 'string' ? value : undefined;
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -106,7 +118,8 @@ function errorStatus(error: unknown): number {
     message.includes('approved') ||
     message.includes('validated') ||
     message.includes('locked') ||
-    message.includes('fixed')
+    message.includes('fixed') ||
+    message.includes('approval receipt')
   ) {
     return 409;
   }
@@ -124,6 +137,22 @@ function normalizedOperations(
     ...(operation.to !== undefined ? { to: operation.to } : {}),
     ...(operation.reason !== undefined ? { reason: operation.reason } : {})
   }));
+}
+
+function requireApproval(
+  req: IncomingMessage,
+  res: ServerResponse,
+  approvalApiKey: string | undefined
+): boolean {
+  if (!approvalApiKey) {
+    sendJson(res, 503, { error: 'approval_api_disabled' });
+    return false;
+  }
+  if (!secureEqual(approvalHeader(req), approvalApiKey)) {
+    sendJson(res, 401, { error: 'approval_unauthorized' });
+    return false;
+  }
+  return true;
 }
 
 export function createHttpServer(options: HttpServerOptions = {}) {
@@ -174,6 +203,58 @@ export function createHttpServer(options: HttpServerOptions = {}) {
         return;
       }
 
+      if (method === 'GET' && url.pathname === '/v1/places/search') {
+        const query = url.searchParams.get('q')?.trim() ?? '';
+        const limitRaw = url.searchParams.get('limit');
+        const limit = limitRaw === null ? 10 : parsePositiveInt(limitRaw);
+        if (!query) {
+          sendJson(res, 400, { error: 'q is required' });
+          return;
+        }
+        if (limit === undefined || limit > 25) {
+          sendJson(res, 400, { error: 'limit must be an integer from 1 to 25' });
+          return;
+        }
+        sendJson(res, 200, { places: store.searchPlaces(query, limit), provider: 'demo-local' });
+        return;
+      }
+
+      if (segments[0] === 'v1' && segments[1] === 'places' && segments[2] && segments.length === 3) {
+        const place = store.getPlace(segments[2]);
+        if (!place) {
+          sendJson(res, 404, { error: 'place_not_found' });
+          return;
+        }
+        sendJson(res, 200, place);
+        return;
+      }
+
+      if (
+        method === 'GET' &&
+        segments[0] === 'v1' &&
+        segments[1] === 'reservations' &&
+        segments[2] &&
+        segments.length === 3
+      ) {
+        const reservation = store.getReservation(segments[2]);
+        if (!reservation) {
+          sendJson(res, 404, { error: 'reservation_not_found' });
+          return;
+        }
+        sendJson(res, 200, reservation);
+        return;
+      }
+
+      if (method === 'POST' && url.pathname === '/v1/routes/estimate') {
+        const body = routeEstimateSchema.parse(await readJson(req));
+        sendJson(
+          res,
+          200,
+          routeService.estimate(body.from_place_id, body.to_place_id, body.mode as TransportMode)
+        );
+        return;
+      }
+
       if (segments[0] === 'v1' && segments[1] === 'trips' && segments[2]) {
         const tripId = segments[2];
 
@@ -204,6 +285,16 @@ export function createHttpServer(options: HttpServerOptions = {}) {
           return;
         }
 
+        if (method === 'GET' && segments[3] === 'constraints' && segments.length === 4) {
+          const trip = store.getTrip(tripId);
+          if (!trip) {
+            sendJson(res, 404, { error: 'trip_not_found' });
+            return;
+          }
+          sendJson(res, 200, { constraints: store.getConstraintsForTrip(trip) });
+          return;
+        }
+
         if (method === 'GET' && segments[3] === 'audit' && segments.length === 4) {
           if (!store.getTrip(tripId)) {
             sendJson(res, 404, { error: 'trip_not_found' });
@@ -229,14 +320,7 @@ export function createHttpServer(options: HttpServerOptions = {}) {
         }
 
         if (method === 'POST' && segments[3] === 'rollback' && segments.length === 4) {
-          if (!approvalApiKey) {
-            sendJson(res, 503, { error: 'approval_api_disabled' });
-            return;
-          }
-          if (!secureEqual(req.headers['x-approval-key'] as string | undefined, approvalApiKey)) {
-            sendJson(res, 401, { error: 'approval_unauthorized' });
-            return;
-          }
+          if (!requireApproval(req, res, approvalApiKey)) return;
           const body = rollbackSchema.parse(await readJson(req));
           sendJson(res, 200, proposalService.rollback(tripId, body.target_version, body.actor_id));
           return;
@@ -266,14 +350,7 @@ export function createHttpServer(options: HttpServerOptions = {}) {
           ['approve', 'reject', 'apply'].includes(segments[3] ?? '') &&
           segments.length === 4
         ) {
-          if (!approvalApiKey) {
-            sendJson(res, 503, { error: 'approval_api_disabled' });
-            return;
-          }
-          if (!secureEqual(req.headers['x-approval-key'] as string | undefined, approvalApiKey)) {
-            sendJson(res, 401, { error: 'approval_unauthorized' });
-            return;
-          }
+          if (!requireApproval(req, res, approvalApiKey)) return;
 
           if (segments[3] === 'approve') {
             const body = approveSchema.parse(await readJson(req));
@@ -323,11 +400,4 @@ export async function runHttpServer(options: HttpServerOptions = {}): Promise<vo
     server.listen(port, host, () => resolve());
   });
   process.stdout.write(`Travel Planning API listening on http://${host}:${port}\n`);
-}
-
-if (process.argv[1]?.endsWith('/http/server.js') || process.argv[1]?.endsWith('\\http\\server.js')) {
-  runHttpServer().catch((error: unknown) => {
-    process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
-    process.exitCode = 1;
-  });
 }
