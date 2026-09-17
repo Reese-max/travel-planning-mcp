@@ -1,4 +1,12 @@
-import type { ChangeProposal, Constraint, Place, Reservation, Trip } from '../domain/types.js';
+import type {
+  ApprovalReceipt,
+  AuditEvent,
+  ChangeProposal,
+  Constraint,
+  Place,
+  Reservation,
+  Trip
+} from '../domain/types.js';
 import { seedConstraints, seedPlaces, seedProposals, seedReservations, seedTrip } from '../data/seed.js';
 
 function copy<T>(value: T): T {
@@ -12,6 +20,7 @@ export class MemoryStore {
   private readonly reservations = new Map<string, Reservation>();
   private readonly constraints = new Map<string, Constraint>();
   private readonly proposals = new Map<string, ChangeProposal>();
+  private readonly auditEvents: AuditEvent[] = [];
 
   constructor() {
     for (const place of seedPlaces) this.places.set(place.place_id, copy(place));
@@ -19,6 +28,12 @@ export class MemoryStore {
     for (const constraint of seedConstraints) this.constraints.set(constraint.constraint_id, copy(constraint));
     for (const proposal of seedProposals) this.proposals.set(proposal.proposal_id, copy(proposal));
     this.saveTrip(seedTrip, false);
+  }
+
+  listTrips(): Trip[] {
+    return [...this.trips.values()]
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      .map(copy);
   }
 
   getTrip(tripId: string, version?: number): Trip | undefined {
@@ -91,13 +106,41 @@ export class MemoryStore {
   setProposalStatus(
     proposalId: string,
     status: ChangeProposal['status'],
-    extra: Partial<Pick<ChangeProposal, 'approved_at' | 'applied_at' | 'applied_trip_version'>> = {}
+    extra: Partial<
+      Pick<
+        ChangeProposal,
+        | 'approval'
+        | 'approved_at'
+        | 'rejected_at'
+        | 'rejection_reason'
+        | 'applied_at'
+        | 'applied_trip_version'
+      >
+    > = {}
   ): ChangeProposal | undefined {
     const proposal = this.proposals.get(proposalId);
     if (!proposal) return undefined;
     const updated: ChangeProposal = { ...proposal, status, ...extra };
     this.proposals.set(proposalId, copy(updated));
     return copy(updated);
+  }
+
+  approveProposal(proposalId: string, receipt: ApprovalReceipt): ChangeProposal | undefined {
+    return this.setProposalStatus(proposalId, 'approved', {
+      approval: receipt,
+      approved_at: receipt.approved_at
+    });
+  }
+
+  appendAudit(event: AuditEvent): void {
+    this.auditEvents.push(copy(event));
+  }
+
+  listAuditForTrip(tripId: string): AuditEvent[] {
+    return this.auditEvents
+      .filter((event) => event.trip_id === tripId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map(copy);
   }
 }
 
