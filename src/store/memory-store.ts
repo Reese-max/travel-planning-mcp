@@ -8,12 +8,17 @@ import type {
   Trip
 } from '../domain/types.js';
 import { seedConstraints, seedPlaces, seedProposals, seedReservations, seedTrip } from '../data/seed.js';
+import type { IdempotencyRecord, TravelStore } from '../ports/travel-store.js';
 
 function copy<T>(value: T): T {
   return structuredClone(value);
 }
 
-export class MemoryStore {
+function idempotencyMapKey(scope: string, key: string): string {
+  return `${scope}\u0000${key}`;
+}
+
+export class MemoryStore implements TravelStore {
   private readonly trips = new Map<string, Trip>();
   private readonly tripVersions = new Map<string, Map<number, Trip>>();
   private readonly places = new Map<string, Place>();
@@ -21,6 +26,7 @@ export class MemoryStore {
   private readonly constraints = new Map<string, Constraint>();
   private readonly proposals = new Map<string, ChangeProposal>();
   private readonly auditEvents: AuditEvent[] = [];
+  private readonly idempotency = new Map<string, IdempotencyRecord>();
 
   constructor() {
     for (const place of seedPlaces) this.places.set(place.place_id, copy(place));
@@ -141,6 +147,15 @@ export class MemoryStore {
       .filter((event) => event.trip_id === tripId)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
       .map(copy);
+  }
+
+  getIdempotency(scope: string, key: string): IdempotencyRecord | undefined {
+    const value = this.idempotency.get(idempotencyMapKey(scope, key));
+    return value ? copy(value) : undefined;
+  }
+
+  saveIdempotency(record: IdempotencyRecord): void {
+    this.idempotency.set(idempotencyMapKey(record.scope, record.key), copy(record));
   }
 }
 
