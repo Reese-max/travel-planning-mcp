@@ -2,6 +2,7 @@ import type { TransportMode } from '../domain/types.js';
 import type { RouteProvider, RouteRequest, RouteResult } from '../ports/route-provider.js';
 import type { TravelStore } from '../ports/travel-store.js';
 import { store } from '../store/memory-store.js';
+import { GoogleRouteProvider } from './google-route-provider.js';
 
 const SPEED_KMH: Record<TransportMode, number> = {
   walking: 4.8,
@@ -61,4 +62,15 @@ export class DemoRouteProvider implements RouteProvider {
   }
 }
 
-export const routeProvider = new DemoRouteProvider();
+function configuredRouteProvider(): RouteProvider {
+  const provider = (process.env.ROUTE_PROVIDER ?? 'demo').toLowerCase();
+  if (provider === 'demo') return new DemoRouteProvider();
+  if (provider === 'google') {
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) throw new Error('ROUTE_PROVIDER=google requires GOOGLE_MAPS_API_KEY.');
+    return new GoogleRouteProvider(apiKey);
+  }
+  throw new Error(`Unsupported ROUTE_PROVIDER: ${provider}`);
+}
+
+export const routeProvider = configuredRouteProvider();
