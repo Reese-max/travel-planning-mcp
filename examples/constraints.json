@@ -1,0 +1,22 @@
+[
+  {
+    "constraint_id": "55555555-5555-4555-8555-555555555555",
+    "type": "return_by",
+    "strength": "hard",
+    "enabled": true,
+    "scope": { "trip": true },
+    "parameters": { "time": "21:00" },
+    "reason": "Return to the hotel by 21:00.",
+    "created_by": "user"
+  },
+  {
+    "constraint_id": "66666666-6666-4666-8666-666666666666",
+    "type": "max_walking_distance",
+    "strength": "soft",
+    "enabled": true,
+    "scope": { "trip": true },
+    "parameters": { "kilometers_per_day": 8 },
+    "reason": "Prefer no more than 8 km walking per day.",
+    "created_by": "user"
+  }
+]
