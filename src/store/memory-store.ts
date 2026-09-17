@@ -52,6 +52,7 @@ export class MemoryStore implements TravelStore {
   }
 
   saveTrip(trip: Trip, replaceCurrent = true): void {
+    this.assertTripInvariants(trip);
     const snapshot = copy(trip);
     let versions = this.tripVersions.get(trip.trip_id);
     if (!versions) {
@@ -156,6 +157,37 @@ export class MemoryStore implements TravelStore {
 
   saveIdempotency(record: IdempotencyRecord): void {
     this.idempotency.set(idempotencyMapKey(record.scope, record.key), copy(record));
+  }
+
+  private assertTripInvariants(trip: Trip): void {
+    for (const day of trip.days) {
+      for (const item of day.items) {
+        if (!item.reservation_id) continue;
+        const reservation = this.reservations.get(item.reservation_id);
+        if (!reservation) {
+          throw new Error(
+            `Trip item ${item.item_id} references unknown reservation ${item.reservation_id}.`
+          );
+        }
+
+        if (!reservation.fixed) continue;
+        if (!item.locked) {
+          throw new Error(
+            `Trip item ${item.item_id} references fixed reservation ${reservation.reservation_id} but is not locked.`
+          );
+        }
+        if (item.start_at !== reservation.start_at) {
+          throw new Error(
+            `Trip item ${item.item_id} cannot change start time of fixed reservation ${reservation.reservation_id}.`
+          );
+        }
+        if ((item.end_at ?? null) !== (reservation.end_at ?? null)) {
+          throw new Error(
+            `Trip item ${item.item_id} cannot change end time of fixed reservation ${reservation.reservation_id}.`
+          );
+        }
+      }
+    }
   }
 }
 
