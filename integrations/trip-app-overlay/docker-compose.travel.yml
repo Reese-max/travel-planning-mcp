@@ -1,0 +1,17 @@
+# Explicitly selected with -f; the upstream compose and MCP are not started.
+services:
+  travel-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: travel-planning-app:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8000"
+    volumes:
+      - travel-app-storage:/app/storage
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  travel-app-storage:

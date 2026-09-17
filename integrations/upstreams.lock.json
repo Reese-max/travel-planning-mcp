@@ -1,0 +1,30 @@
+{
+  "format_version": 1,
+  "verified_at": "2026-09-17",
+  "app": {
+    "repository": "itskovacs/trip",
+    "url": "https://github.com/itskovacs/trip.git",
+    "commit": "46a4ab4e28dcc761388f81865db5a5ef8050d7aa",
+    "license_file": "license.txt",
+    "license": "MIT",
+    "directory": "travel-planning-app",
+    "role": "app_base",
+    "target_repository": "Reese-max/travel-planning-app",
+    "remote_fork_created_by_this_change": false
+  },
+  "reference": {
+    "repository": "shaikhspeare/wanderlog-mcp",
+    "url": "https://github.com/shaikhspeare/wanderlog-mcp.git",
+    "commit": "b946034eb1b39180de0c7276cbaeb84ccf0ddd90",
+    "license_file": "LICENSE",
+    "license": "MIT",
+    "directory": "wanderlog-reference",
+    "role": "research_only_not_runtime"
+  },
+  "excluded": [
+    {
+      "repository": "RicterZ/mapannai-plus",
+      "reason": "No source reuse: license permission was not established."
+    }
+  ]
+}
