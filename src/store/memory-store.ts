@@ -9,6 +9,7 @@ import type {
 } from '../domain/types.js';
 import { seedConstraints, seedPlaces, seedProposals, seedReservations, seedTrip } from '../data/seed.js';
 import type { IdempotencyRecord, TravelStore } from '../ports/travel-store.js';
+import { schemaRegistry } from '../validation/schema-registry.js';
 
 function copy<T>(value: T): T {
   return structuredClone(value);
@@ -29,10 +30,22 @@ export class MemoryStore implements TravelStore {
   private readonly idempotency = new Map<string, IdempotencyRecord>();
 
   constructor() {
-    for (const place of seedPlaces) this.places.set(place.place_id, copy(place));
-    for (const reservation of seedReservations) this.reservations.set(reservation.reservation_id, copy(reservation));
-    for (const constraint of seedConstraints) this.constraints.set(constraint.constraint_id, copy(constraint));
-    for (const proposal of seedProposals) this.proposals.set(proposal.proposal_id, copy(proposal));
+    for (const place of seedPlaces) {
+      schemaRegistry.assertPlace(place);
+      this.places.set(place.place_id, copy(place));
+    }
+    for (const reservation of seedReservations) {
+      schemaRegistry.assertReservation(reservation);
+      this.reservations.set(reservation.reservation_id, copy(reservation));
+    }
+    for (const constraint of seedConstraints) {
+      schemaRegistry.assertConstraint(constraint);
+      this.constraints.set(constraint.constraint_id, copy(constraint));
+    }
+    for (const proposal of seedProposals) {
+      schemaRegistry.assertChangeProposal(proposal);
+      this.proposals.set(proposal.proposal_id, copy(proposal));
+    }
     this.saveTrip(seedTrip, false);
   }
 
@@ -52,6 +65,7 @@ export class MemoryStore implements TravelStore {
   }
 
   saveTrip(trip: Trip, replaceCurrent = true): void {
+    schemaRegistry.assertTrip(trip);
     this.assertTripInvariants(trip);
     const snapshot = copy(trip);
     let versions = this.tripVersions.get(trip.trip_id);
@@ -107,6 +121,7 @@ export class MemoryStore implements TravelStore {
   }
 
   saveProposal(proposal: ChangeProposal): void {
+    schemaRegistry.assertChangeProposal(proposal);
     this.proposals.set(proposal.proposal_id, copy(proposal));
   }
 
@@ -128,6 +143,7 @@ export class MemoryStore implements TravelStore {
     const proposal = this.proposals.get(proposalId);
     if (!proposal) return undefined;
     const updated: ChangeProposal = { ...proposal, status, ...extra };
+    schemaRegistry.assertChangeProposal(updated);
     this.proposals.set(proposalId, copy(updated));
     return copy(updated);
   }
