@@ -189,6 +189,14 @@ export interface ProposalValidation {
   conflicts: string[];
 }
 
+export interface ApprovalReceipt {
+  approval_id: string;
+  actor_id: string;
+  channel: 'http' | 'admin' | 'ui';
+  approved_at: string;
+  note?: string | null;
+}
+
 export interface ChangeProposal {
   proposal_id: string;
   trip_id: string;
@@ -220,7 +228,29 @@ export interface ChangeProposal {
     actor_id?: string | null;
   };
   created_at: string;
+  approval?: ApprovalReceipt | null;
   approved_at?: string | null;
+  rejected_at?: string | null;
+  rejection_reason?: string | null;
   applied_at?: string | null;
   applied_trip_version?: number | null;
+}
+
+export type AuditEventType =
+  | 'proposal_created'
+  | 'proposal_validated'
+  | 'proposal_approved'
+  | 'proposal_rejected'
+  | 'proposal_applied'
+  | 'trip_rolled_back';
+
+export interface AuditEvent {
+  event_id: string;
+  event_type: AuditEventType;
+  trip_id: string;
+  proposal_id?: string | null;
+  actor_type: 'user' | 'ai' | 'system' | 'operator';
+  actor_id?: string | null;
+  created_at: string;
+  metadata?: Record<string, unknown>;
 }
