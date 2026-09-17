@@ -45,18 +45,9 @@
       "properties": {
         "valid": { "type": "boolean" },
         "validated_at": { "type": ["string", "null"], "format": "date-time" },
-        "hard_constraint_violations": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "soft_constraint_warnings": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "conflicts": {
-          "type": "array",
-          "items": { "type": "string" }
-        }
+        "hard_constraint_violations": { "type": "array", "items": { "type": "string" } },
+        "soft_constraint_warnings": { "type": "array", "items": { "type": "string" } },
+        "conflicts": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["valid", "hard_constraint_violations", "soft_constraint_warnings", "conflicts"],
       "additionalProperties": false
@@ -87,7 +78,26 @@
       "additionalProperties": false
     },
     "created_at": { "type": "string", "format": "date-time" },
+    "approval": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["approval_id", "actor_id", "channel", "approved_at"],
+          "properties": {
+            "approval_id": { "type": "string", "format": "uuid" },
+            "actor_id": { "type": "string", "minLength": 1 },
+            "channel": { "enum": ["http", "admin", "ui"] },
+            "approved_at": { "type": "string", "format": "date-time" },
+            "note": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "approved_at": { "type": ["string", "null"], "format": "date-time" },
+    "rejected_at": { "type": ["string", "null"], "format": "date-time" },
+    "rejection_reason": { "type": ["string", "null"] },
     "applied_at": { "type": ["string", "null"], "format": "date-time" },
     "applied_trip_version": { "type": ["integer", "null"], "minimum": 1 }
   },

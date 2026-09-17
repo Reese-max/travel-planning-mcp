@@ -1,6 +1,6 @@
 {
   "name": "travel-planning-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "AI-readable and AI-writable travel planning API and MCP server with constraint-aware change proposals.",
   "type": "module",
@@ -8,9 +8,13 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "npm run dev:mcp",
+    "dev:mcp": "tsx src/index.ts",
+    "dev:api": "tsx src/http/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
+    "start": "npm run start:mcp",
+    "start:mcp": "node dist/index.js",
+    "start:api": "node dist/http/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "check": "npm run typecheck && npm test"

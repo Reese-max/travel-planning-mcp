@@ -1,15 +1,39 @@
 openapi: 3.1.0
 info:
   title: Travel Planning API
-  version: 0.1.0
+  version: 0.2.0
   description: >-
-    Planned REST surface over the same canonical service layer used by the MCP
-    server. AI-originated mutations must use ChangeProposal rather than raw trip
-    replacement.
+    Canonical travel planning API used alongside the MCP server. AI-originated
+    mutations become ChangeProposal objects. Approval/apply/rollback operations
+    are protected by a separate operator credential.
 servers:
-  - url: https://api.example.invalid/v1
-    description: Placeholder only; no public deployment exists yet.
+  - url: http://127.0.0.1:8787/v1
+    description: Default local development server
+security:
+  - bearerAuth: []
 paths:
+  /trips:
+    get:
+      summary: List trips
+      responses:
+        '200':
+          description: Trip summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [trip_id, version, title, start_date, end_date, status, updated_at]
+                  properties:
+                    trip_id: { type: string, format: uuid }
+                    version: { type: integer, minimum: 1 }
+                    title: { type: string }
+                    start_date: { type: string, format: date }
+                    end_date: { type: string, format: date }
+                    status: { type: string }
+                    updated_at: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /trips/{tripId}:
     get:
       summary: Read a canonical trip
@@ -18,18 +42,54 @@ paths:
         - name: version
           in: query
           required: false
-          schema:
-            type: integer
-            minimum: 1
+          schema: { type: integer, minimum: 1 }
       responses:
         '200':
-          description: Trip snapshot
+          description: Trip snapshot and available versions
           content:
             application/json:
               schema:
-                $ref: '../schemas/trip.schema.json'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                type: object
+                required: [trip, versions]
+                properties:
+                  trip: { $ref: '../schemas/trip.schema.json' }
+                  versions:
+                    type: array
+                    items: { type: integer, minimum: 1 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /trips/{tripId}/context:
+    get:
+      summary: Read AI-friendly aggregate trip context
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - name: version
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Trip with referenced places, reservations, constraints, and versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trip, places, reservations, constraints, versions]
+                properties:
+                  trip: { $ref: '../schemas/trip.schema.json' }
+                  places:
+                    type: array
+                    items: { $ref: '../schemas/place.schema.json' }
+                  reservations:
+                    type: array
+                    items: { $ref: '../schemas/reservation.schema.json' }
+                  constraints:
+                    type: array
+                    items: { $ref: '../schemas/constraint.schema.json' }
+                  versions:
+                    type: array
+                    items: { type: integer, minimum: 1 }
+        '404': { $ref: '#/components/responses/NotFound' }
   /trips/{tripId}/constraints:
     get:
       summary: Read constraints for a trip
@@ -46,10 +106,17 @@ paths:
                 properties:
                   constraints:
                     type: array
-                    items:
-                      $ref: '../schemas/constraint.schema.json'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                    items: { $ref: '../schemas/constraint.schema.json' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /trips/{tripId}/audit:
+    get:
+      summary: Read proposal/rollback audit events for a trip
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      responses:
+        '200':
+          description: Audit events
+        '404': { $ref: '#/components/responses/NotFound' }
   /trips/{tripId}/proposals:
     post:
       summary: Create a change proposal
@@ -61,45 +128,105 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [operations]
-              properties:
-                title:
-                  type: string
-                summary:
-                  type: string
-                reason:
-                  type: string
-                operations:
-                  type: array
-                  minItems: 1
-                  items:
-                    type: object
-                    required: [operation, target_type]
-                    properties:
-                      operation:
-                        enum: [add, remove, move, update, replace]
-                      target_type:
-                        enum: [trip_item, place, reservation, constraint]
-                      target_id:
-                        type: [string, 'null']
-                      from:
-                        type: [object, 'null']
-                        additionalProperties: true
-                      to:
-                        type: [object, 'null']
-                        additionalProperties: true
-                      reason:
-                        type: [string, 'null']
+              $ref: '#/components/schemas/CreateProposalRequest'
       responses:
         '201':
           description: Draft proposal
           content:
             application/json:
-              schema:
-                $ref: '../schemas/change-proposal.schema.json'
-        '404':
-          $ref: '#/components/responses/NotFound'
+              schema: { $ref: '../schemas/change-proposal.schema.json' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /trips/{tripId}/rollback:
+    post:
+      summary: Restore an older snapshot as a new trip version
+      description: Requires both Bearer auth and X-Approval-Key.
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - $ref: '#/components/parameters/ApprovalKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_version, actor_id]
+              properties:
+                target_version: { type: integer, minimum: 1 }
+                actor_id: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: New trip version restored from older snapshot
+          content:
+            application/json:
+              schema: { $ref: '../schemas/trip.schema.json' }
+        '401': { $ref: '#/components/responses/ApprovalUnauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /places/search:
+    get:
+      summary: Search the configured place adapter
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 25, default: 10 }
+      responses:
+        '200':
+          description: Normalized places and provider label
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /places/{placeId}:
+    get:
+      summary: Read one normalized place
+      parameters:
+        - name: placeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Place
+          content:
+            application/json:
+              schema: { $ref: '../schemas/place.schema.json' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /reservations/{reservationId}:
+    get:
+      summary: Read one reservation
+      parameters:
+        - name: reservationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Reservation
+          content:
+            application/json:
+              schema: { $ref: '../schemas/reservation.schema.json' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /routes/estimate:
+    post:
+      summary: Calculate a route through the configured route adapter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_place_id, to_place_id, mode]
+              properties:
+                from_place_id: { type: string, format: uuid }
+                to_place_id: { type: string, format: uuid }
+                mode:
+                  enum: [walking, transit, rail, taxi, car, bike]
+      responses:
+        '200':
+          description: Route result or explicitly labeled estimate
+        '400': { $ref: '#/components/responses/BadRequest' }
   /proposals/{proposalId}:
     get:
       summary: Read a proposal
@@ -110,13 +237,11 @@ paths:
           description: Proposal
           content:
             application/json:
-              schema:
-                $ref: '../schemas/change-proposal.schema.json'
-        '404':
-          $ref: '#/components/responses/NotFound'
+              schema: { $ref: '../schemas/change-proposal.schema.json' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /proposals/{proposalId}/validate:
     post:
-      summary: Validate a proposal against the current trip and constraints
+      summary: Simulate and validate a proposal
       parameters:
         - $ref: '#/components/parameters/ProposalId'
       responses:
@@ -124,51 +249,136 @@ paths:
           description: Validated proposal
           content:
             application/json:
-              schema:
-                $ref: '../schemas/change-proposal.schema.json'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: Proposal or trip version conflict
-  /proposals/{proposalId}/apply:
+              schema: { $ref: '../schemas/change-proposal.schema.json' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /proposals/{proposalId}/approve:
     post:
-      summary: Apply an externally approved proposal
-      description: >-
-        The API must verify an operator/human approval receipt. The MCP server is
-        intentionally unable to approve its own proposal.
+      summary: Human/operator approval of a validated proposal
+      description: Requires X-Approval-Key in addition to Bearer auth.
       parameters:
         - $ref: '#/components/parameters/ProposalId'
+        - $ref: '#/components/parameters/ApprovalKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actor_id]
+              properties:
+                actor_id: { type: string, minLength: 1 }
+                note: { type: string, maxLength: 2000 }
       responses:
         '200':
-          description: New trip version created from the approved proposal
+          description: Proposal with approval receipt
+          content:
+            application/json:
+              schema: { $ref: '../schemas/change-proposal.schema.json' }
+        '401': { $ref: '#/components/responses/ApprovalUnauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /proposals/{proposalId}/reject:
+    post:
+      summary: Reject a proposal
+      description: Requires X-Approval-Key in addition to Bearer auth.
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+        - $ref: '#/components/parameters/ApprovalKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actor_id]
+              properties:
+                actor_id: { type: string, minLength: 1 }
+                reason: { type: string, maxLength: 2000 }
+      responses:
+        '200':
+          description: Rejected proposal
+          content:
+            application/json:
+              schema: { $ref: '../schemas/change-proposal.schema.json' }
+  /proposals/{proposalId}/apply:
+    post:
+      summary: Apply an approved proposal
+      description: Requires X-Approval-Key and a stored approval receipt. Creates Trip vN+1.
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+        - $ref: '#/components/parameters/ApprovalKey'
+      responses:
+        '200':
+          description: Proposal and new trip version
           content:
             application/json:
               schema:
                 type: object
                 required: [proposal, trip]
                 properties:
-                  proposal:
-                    $ref: '../schemas/change-proposal.schema.json'
-                  trip:
-                    $ref: '../schemas/trip.schema.json'
-        '409':
-          description: Not approved, invalid, or stale proposal
+                  proposal: { $ref: '../schemas/change-proposal.schema.json' }
+                  trip: { $ref: '../schemas/trip.schema.json' }
+        '401': { $ref: '#/components/responses/ApprovalUnauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: TRAVEL_API_KEY when configured. Required for non-loopback deployments.
   parameters:
     TripId:
       name: tripId
       in: path
       required: true
-      schema:
-        type: string
-        format: uuid
+      schema: { type: string, format: uuid }
     ProposalId:
       name: proposalId
       in: path
       required: true
-      schema:
-        type: string
-        format: uuid
+      schema: { type: string, format: uuid }
+    ApprovalKey:
+      name: X-Approval-Key
+      in: header
+      required: true
+      schema: { type: string }
+      description: Separate operator credential; never expose it to ordinary AI clients.
+  schemas:
+    CreateProposalRequest:
+      type: object
+      required: [operations]
+      properties:
+        title: { type: string }
+        summary: { type: string }
+        reason: { type: string }
+        model: { type: string }
+        actor_id: { type: string }
+        operations:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [operation, target_type]
+            properties:
+              operation:
+                enum: [add, remove, move, update, replace]
+              target_type:
+                enum: [trip_item, place, reservation, constraint]
+              target_id: { type: [string, 'null'] }
+              from:
+                type: [object, 'null']
+                additionalProperties: true
+              to:
+                type: [object, 'null']
+                additionalProperties: true
+              reason: { type: [string, 'null'] }
   responses:
+    BadRequest:
+      description: Invalid request
+    Unauthorized:
+      description: Missing or invalid Bearer token
+    ApprovalUnauthorized:
+      description: Missing or invalid X-Approval-Key
     NotFound:
       description: Resource not found
+    Conflict:
+      description: Invalid state, stale version, protected item, or approval conflict
