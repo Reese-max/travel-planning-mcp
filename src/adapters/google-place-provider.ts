@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { Place } from '../domain/types.js';
 import type { PlaceProvider, PlaceSearchRequest, PlaceSearchResult } from '../ports/place-provider.js';
 import type { TravelStore } from '../ports/travel-store.js';
 import { store } from '../store/memory-store.js';
@@ -77,22 +78,23 @@ export class GooglePlaceProvider implements PlaceProvider {
 
     const payload = (await response.json()) as GoogleTextSearchResponse;
     const retrievedAt = new Date().toISOString();
-    const places = (payload.places ?? [])
+    const places: Place[] = (payload.places ?? [])
       .filter((place) => place.id && place.displayName?.text && place.location?.latitude !== undefined && place.location?.longitude !== undefined)
       .slice(0, request.limit)
       .map((place) => {
         const googleId = place.id!;
+        const languageCode = place.displayName?.languageCode;
         const canonicalId = canonicalUuid('google-place', googleId);
         const categories = [place.primaryType, ...(place.types ?? [])]
           .filter((value): value is string => Boolean(value))
           .filter((value, index, array) => array.indexOf(value) === index);
 
-        const normalized = {
+        const normalized: Place = {
           place_id: canonicalId,
           name: place.displayName!.text!,
-          localized_names: place.displayName?.languageCode
-            ? { [place.displayName.languageCode]: place.displayName.text! }
-            : undefined,
+          ...(languageCode
+            ? { localized_names: { [languageCode]: place.displayName!.text! } }
+            : {}),
           categories: categories.length > 0 ? categories : ['place'],
           location: {
             lat: place.location!.latitude!,
