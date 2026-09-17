@@ -1,6 +1,6 @@
 {
   "name": "travel-planning-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "AI-readable and AI-writable travel planning API and MCP server with constraint-aware change proposals.",
   "type": "module",
@@ -21,6 +21,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
     "zod": "^4.1.0"
   },
   "devDependencies": {
