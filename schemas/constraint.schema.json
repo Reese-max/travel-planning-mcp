@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://travel-planning-mcp.dev/schemas/constraint.schema.json",
+  "title": "Constraint",
+  "type": "object",
+  "required": ["constraint_id", "type", "strength", "enabled", "scope", "parameters", "created_by"],
+  "properties": {
+    "constraint_id": { "type": "string", "format": "uuid" },
+    "type": {
+      "enum": [
+        "fixed_item",
+        "time_window",
+        "return_by",
+        "start_after",
+        "max_places_per_day",
+        "max_walking_distance",
+        "max_daily_budget",
+        "transport_mode",
+        "accessibility",
+        "dietary",
+        "pace",
+        "must_visit",
+        "avoid_place",
+        "avoid_category",
+        "preferred_area",
+        "traveler_requirement",
+        "custom"
+      ]
+    },
+    "strength": {
+      "enum": ["hard", "soft"],
+      "description": "Hard constraints must not be violated. Soft constraints may be violated only with an explicit warning and rationale."
+    },
+    "enabled": { "type": "boolean" },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "trip": { "type": "boolean" },
+        "date": { "type": ["string", "null"], "format": "date" },
+        "traveler_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "item_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "parameters": {
+      "type": "object",
+      "description": "Typed by constraint type at the application layer. Examples: {time:'21:00'}, {kilometers_per_day:8}, {amount:12000,currency:'JPY'}.",
+      "additionalProperties": true
+    },
+    "reason": { "type": ["string", "null"] },
+    "created_by": { "enum": ["user", "system", "ai", "import"] },
+    "created_at": { "type": ["string", "null"], "format": "date-time" }
+  },
+  "additionalProperties": false
+}
