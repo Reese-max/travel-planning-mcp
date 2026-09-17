@@ -126,7 +126,7 @@ export const seedTrip: Trip = {
           reservation_id: seedReservations[0]!.reservation_id,
           title: 'TPE → NRT',
           start_at: seedReservations[0]!.start_at,
-          end_at: seedReservations[0]!.end_at,
+          end_at: seedReservations[0]!.end_at ?? null,
           locked: true
         },
         {
