@@ -1,6 +1,6 @@
 {
   "name": "travel-planning-mcp",
-  "version": "0.4.0",
+  "version": "0.3.0",
   "private": true,
   "description": "AI-readable and AI-writable travel planning API and MCP server with constraint-aware change proposals.",
   "type": "module",
