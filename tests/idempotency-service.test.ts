@@ -26,6 +26,27 @@ describe('IdempotencyService', () => {
     expect(executions).toBe(1);
   });
 
+  it('serializes concurrent requests sharing the same key', async () => {
+    const service = new IdempotencyService(new MemoryStore());
+    let executions = 0;
+
+    const action = async () => {
+      executions += 1;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { status: 200, body: { executions } };
+    };
+
+    const [first, second] = await Promise.all([
+      service.execute('apply:concurrent', 'same-key', { value: 1 }, action),
+      service.execute('apply:concurrent', 'same-key', { value: 1 }, action)
+    ]);
+
+    expect(executions).toBe(1);
+    expect([first.replayed, second.replayed].sort()).toEqual([false, true]);
+    expect(first.body).toEqual({ executions: 1 });
+    expect(second.body).toEqual({ executions: 1 });
+  });
+
   it('rejects reusing the same key with a different request fingerprint', async () => {
     const service = new IdempotencyService(new MemoryStore());
 
