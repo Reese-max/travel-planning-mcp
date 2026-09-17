@@ -10,8 +10,8 @@ export class RouteService {
     return this.provider.descriptor;
   }
 
-  estimate(fromPlaceId: string, toPlaceId: string, mode: TransportMode): RouteResult | Promise<RouteResult> {
-    return this.provider.calculate({
+  async estimate(fromPlaceId: string, toPlaceId: string, mode: TransportMode): Promise<RouteResult> {
+    return await this.provider.calculate({
       from_place_id: fromPlaceId,
       to_place_id: toPlaceId,
       mode
