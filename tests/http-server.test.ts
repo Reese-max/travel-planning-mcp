@@ -5,6 +5,9 @@ import { demoTripId } from '../src/data/seed.js';
 
 const READ_KEY = 'test-read-key';
 const APPROVAL_KEY = 'test-approval-key';
+const TOKYO_STATION_ID = '22222222-2222-4222-8222-222222222222';
+const SENSOJI_ID = '33333333-3333-4333-8333-333333333333';
+const FLIGHT_RESERVATION_ID = '44444444-4444-4444-8444-444444444444';
 
 const instance = createHttpServer({
   host: '127.0.0.1',
@@ -69,6 +72,47 @@ describe('Travel Planning REST API', () => {
     expect(body.places.length).toBeGreaterThan(0);
     expect(body.reservations.length).toBeGreaterThan(0);
     expect(body.constraints.length).toBeGreaterThan(0);
+  });
+
+  it('exposes normalized place, reservation, constraint, and route context', async () => {
+    const constraints = await authorizedFetch(`/v1/trips/${demoTripId}/constraints`);
+    expect(constraints.status).toBe(200);
+    expect((await constraints.json()) as { constraints: unknown[] }).toMatchObject({
+      constraints: expect.any(Array)
+    });
+
+    const search = await authorizedFetch('/v1/places/search?q=Tokyo&limit=5');
+    expect(search.status).toBe(200);
+    const searchBody = (await search.json()) as {
+      provider: string;
+      places: Array<{ place_id: string }>;
+    };
+    expect(searchBody.provider).toBe('demo-local');
+    expect(searchBody.places.some((place) => place.place_id === TOKYO_STATION_ID)).toBe(true);
+
+    const place = await authorizedFetch(`/v1/places/${SENSOJI_ID}`);
+    expect(place.status).toBe(200);
+    expect(await place.json()).toMatchObject({ place_id: SENSOJI_ID, name: 'Senso-ji' });
+
+    const reservation = await authorizedFetch(`/v1/reservations/${FLIGHT_RESERVATION_ID}`);
+    expect(reservation.status).toBe(200);
+    expect(await reservation.json()).toMatchObject({ reservation_id: FLIGHT_RESERVATION_ID, fixed: true });
+
+    const route = await authorizedFetch('/v1/routes/estimate', {
+      method: 'POST',
+      body: JSON.stringify({
+        from_place_id: TOKYO_STATION_ID,
+        to_place_id: SENSOJI_ID,
+        mode: 'walking'
+      })
+    });
+    expect(route.status).toBe(200);
+    expect(await route.json()).toMatchObject({
+      from_place_id: TOKYO_STATION_ID,
+      to_place_id: SENSOJI_ID,
+      mode: 'walking',
+      source: 'demo-haversine-estimate'
+    });
   });
 
   it('keeps approval behind a separate operator credential', async () => {
