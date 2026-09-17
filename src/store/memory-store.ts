@@ -52,6 +52,21 @@ export class MemoryStore {
     return value ? copy(value) : undefined;
   }
 
+  searchPlaces(query: string, limit = 10): Place[] {
+    const normalized = query.trim().toLocaleLowerCase();
+    if (!normalized) return [];
+    return [...this.places.values()]
+      .filter((place) => {
+        const names = [place.name, ...Object.values(place.localized_names ?? {})];
+        return (
+          names.some((name) => name.toLocaleLowerCase().includes(normalized)) ||
+          place.categories.some((category) => category.toLocaleLowerCase().includes(normalized))
+        );
+      })
+      .slice(0, Math.max(1, Math.min(limit, 25)))
+      .map(copy);
+  }
+
   getReservation(reservationId: string): Reservation | undefined {
     const value = this.reservations.get(reservationId);
     return value ? copy(value) : undefined;
