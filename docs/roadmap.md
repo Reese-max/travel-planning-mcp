@@ -36,6 +36,7 @@
 - [x] Define normalized `PlaceProvider` port.
 - [x] Define normalized `RouteProvider` port.
 - [x] Wrap demo place and route data in explicit provider adapters.
+- [x] Allow external providers to persist normalized places into the canonical store.
 - [ ] Add PostgreSQL persistence and immutable trip version history.
 - [ ] Enforce durable unique `(idempotency_scope, idempotency_key)` constraints.
 - [ ] Wrap proposal apply/rollback in database transactions.
@@ -46,11 +47,16 @@
 
 ## Phase 3 — Real travel context adapters
 
-Highest-priority next adapters:
+Highest-priority adapters:
 
-- [ ] Google Places adapter behind `PlaceProvider`.
-- [ ] Google Routes adapter behind `RouteProvider`.
+- [x] Google Places API (New) Text Search adapter behind `PlaceProvider`.
+- [x] Google Routes API v2 `computeRoutes` adapter behind `RouteProvider`.
+- [x] Environment-selectable demo/live place and route providers.
+- [x] Unit tests for provider normalization, persistence, routing, and upstream failures.
+- [ ] Google Place Details refresh path for persisted canonical Place IDs.
+- [ ] Location bias / language / included-type inputs for place search.
 - [ ] Route-matrix support for optimization.
+- [ ] Provider timeout, retry/backoff, quota telemetry, and circuit-breaker behavior.
 
 Then:
 
@@ -61,7 +67,7 @@ Then:
 - [ ] Calendar reservation import.
 - [ ] Email booking extraction.
 
-All adapters must retain source, retrieval/calculation time, and freshness metadata. Estimated data must never be presented as live provider data.
+All adapters must retain source, retrieval/calculation time, and freshness metadata. Estimated data must never be presented as live provider data. Live providers should use narrowly scoped field masks and explicit quota/error handling.
 
 ## Phase 4 — Constraint-aware planner
 
