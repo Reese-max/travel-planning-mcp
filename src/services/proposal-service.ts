@@ -30,6 +30,13 @@ export interface ApproveProposalInput {
   note?: string;
 }
 
+export class ProposalLifecycleConflictError extends Error {
+  constructor(proposalId: string, status: ChangeProposal['status']) {
+    super(`Proposal ${proposalId} cannot be validated while its status is ${status}.`);
+    this.name = 'ProposalLifecycleConflictError';
+  }
+}
+
 interface Evaluation {
   validation: ProposalValidation;
   simulated: Trip;
@@ -157,6 +164,9 @@ export class ProposalService {
 
   validate(proposalId: string): ChangeProposal {
     const proposal = this.requireProposal(proposalId);
+    if (!['draft', 'validated', 'needs_review'].includes(proposal.status)) {
+      throw new ProposalLifecycleConflictError(proposalId, proposal.status);
+    }
     const trip = this.requireTrip(proposal.trip_id);
     const evaluation = this.evaluate(proposal, trip);
 

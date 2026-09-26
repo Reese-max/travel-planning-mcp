@@ -178,6 +178,14 @@ describe('Travel Planning REST API', () => {
     expect(approved.status).toBe('approved');
     expect(approved.approval).toMatchObject({ actor_id: 'reviewer', channel: 'http' });
 
+    const revalidateApproved = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}/validate`, {
+      method: 'POST'
+    });
+    expect(revalidateApproved.status).toBe(409);
+    expect(await revalidateApproved.json()).toMatchObject({ error: expect.stringContaining('status is approved') });
+    const stillApproved = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}`);
+    expect(await stillApproved.json()).toEqual(approved);
+
     const missingIdempotency = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}/apply`, {
       method: 'POST',
       headers: { 'x-approval-key': APPROVAL_KEY },
@@ -196,7 +204,18 @@ describe('Travel Planning REST API', () => {
     });
     expect(apply.status).toBe(200);
     expect(apply.headers.get('idempotent-replayed')).toBe('false');
-    const firstApplied = (await apply.json()) as { trip: { version: number } };
+    const firstApplied = (await apply.json()) as {
+      trip: { version: number };
+      proposal: { status: string; applied_at?: string; applied_trip_version?: number };
+    };
+
+    const revalidateApplied = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}/validate`, {
+      method: 'POST'
+    });
+    expect(revalidateApplied.status).toBe(409);
+    expect(await revalidateApplied.json()).toMatchObject({ error: expect.stringContaining('status is applied') });
+    const stillApplied = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}`);
+    expect(await stillApplied.json()).toEqual(firstApplied.proposal);
 
     const replay = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}/apply`, {
       method: 'POST',
@@ -210,5 +229,45 @@ describe('Travel Planning REST API', () => {
     expect(replay.headers.get('idempotent-replayed')).toBe('true');
     const replayed = (await replay.json()) as { trip: { version: number } };
     expect(replayed.trip.version).toBe(firstApplied.trip.version);
+  });
+
+  it('returns a conflict without reopening an operator-rejected proposal', async () => {
+    const create = await authorizedFetch(`/v1/trips/${demoTripId}/proposals`, {
+      method: 'POST',
+      headers: { 'idempotency-key': 'create-http-rejection-test' },
+      body: JSON.stringify({
+        operations: [{
+          operation: 'update',
+          target_type: 'trip_item',
+          target_id: '88888888-8888-4888-8888-888888888888',
+          to: { notes: 'Rejected proposal must stay rejected.' }
+        }]
+      })
+    });
+    expect(create.status).toBe(201);
+    const proposal = (await create.json()) as { proposal_id: string };
+
+    const validate = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}/validate`, {
+      method: 'POST'
+    });
+    expect(validate.status).toBe(200);
+    const reject = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}/reject`, {
+      method: 'POST',
+      headers: {
+        'x-approval-key': APPROVAL_KEY,
+        'idempotency-key': 'reject-http-rejection-test'
+      },
+      body: JSON.stringify({ actor_id: 'reviewer', reason: 'Operator decision.' })
+    });
+    expect(reject.status).toBe(200);
+    const rejected = await reject.json();
+
+    const revalidate = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}/validate`, {
+      method: 'POST'
+    });
+    expect(revalidate.status).toBe(409);
+    expect(await revalidate.json()).toMatchObject({ error: expect.stringContaining('status is rejected') });
+    const stillRejected = await authorizedFetch(`/v1/proposals/${proposal.proposal_id}`);
+    expect(await stillRejected.json()).toEqual(rejected);
   });
 });

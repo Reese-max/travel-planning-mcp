@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { placeProvider } from '../adapters/demo-place-provider.js';
 import type { ChangeOperation, TransportMode } from '../domain/types.js';
 import { idempotencyService, IdempotencyConflictError } from '../services/idempotency-service.js';
-import { proposalService } from '../services/proposal-service.js';
+import { proposalService, ProposalLifecycleConflictError } from '../services/proposal-service.js';
 import { routeService } from '../services/route-service.js';
 import { tripContextService } from '../services/trip-context-service.js';
 import { store } from '../store/memory-store.js';
@@ -133,7 +133,7 @@ function parsePositiveInt(value: string | null): number | undefined {
 }
 
 function errorStatus(error: unknown): number {
-  if (error instanceof IdempotencyConflictError) return 409;
+  if (error instanceof IdempotencyConflictError || error instanceof ProposalLifecycleConflictError) return 409;
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes('not found') || message.includes('not found:')) return 404;
   if (
