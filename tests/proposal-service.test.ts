@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { demoTripId } from '../src/data/seed.js';
-import { ProposalService } from '../src/services/proposal-service.js';
+import {
+  ProposalLifecycleConflictError,
+  ProposalService
+} from '../src/services/proposal-service.js';
 import { MemoryStore } from '../src/store/memory-store.js';
 
 const FLIGHT_ITEM_ID = '77777777-7777-4777-8777-777777777777';
@@ -98,6 +101,68 @@ describe('ProposalService', () => {
     expect(validated.impact?.affected_days).toEqual(['2026-10-20']);
     expect(afterValidation).toEqual(before);
   });
+
+  it('permits revalidation while a proposal remains editable', () => {
+    const db = new MemoryStore();
+    const service = new ProposalService(db);
+    const valid = safeMove(service);
+
+    expect(service.validate(valid.proposal_id).status).toBe('validated');
+    expect(service.validate(valid.proposal_id).status).toBe('validated');
+
+    const invalid = service.create({
+      tripId: demoTripId,
+      operations: [{ operation: 'remove', target_type: 'trip_item', target_id: FLIGHT_ITEM_ID }]
+    });
+    expect(service.validate(invalid.proposal_id).status).toBe('needs_review');
+    expect(service.validate(invalid.proposal_id).status).toBe('needs_review');
+  });
+
+  it('keeps approval and its receipt intact so an approved proposal can still apply', () => {
+    const db = new MemoryStore();
+    const service = new ProposalService(db);
+    const proposal = safeMove(service);
+    service.validate(proposal.proposal_id);
+    service.approve({ proposalId: proposal.proposal_id, actorId: 'reviewer', channel: 'ui' });
+    const approved = db.getProposal(proposal.proposal_id);
+    const auditBefore = db.listAuditForTrip(demoTripId);
+
+    expect(() => service.validate(proposal.proposal_id)).toThrow(ProposalLifecycleConflictError);
+    expect(() => service.validate(proposal.proposal_id)).toThrow(/status is approved/);
+    expect(db.getProposal(proposal.proposal_id)).toEqual(approved);
+    expect(db.listAuditForTrip(demoTripId)).toEqual(auditBefore);
+
+    const applied = service.apply(proposal.proposal_id);
+    expect(applied.proposal.status).toBe('applied');
+    expect(applied.trip.version).toBe(2);
+  });
+
+  it.each(['rejected', 'applied', 'expired', 'validating'] as const)(
+    'does not mutate a %s proposal during revalidation',
+    (status) => {
+      const db = new MemoryStore();
+      const service = new ProposalService(db);
+      const proposal = safeMove(service);
+      service.validate(proposal.proposal_id);
+      if (status === 'rejected') {
+        service.reject(proposal.proposal_id, 'reviewer', 'Do not change this stop.');
+      } else if (status === 'applied') {
+        service.approve({ proposalId: proposal.proposal_id, actorId: 'reviewer', channel: 'ui' });
+        service.apply(proposal.proposal_id);
+      } else {
+        db.setProposalStatus(proposal.proposal_id, status);
+      }
+      const before = db.getProposal(proposal.proposal_id);
+      const tripBefore = db.getTrip(demoTripId);
+      const auditBefore = db.listAuditForTrip(demoTripId);
+
+      expect(() => service.validate(proposal.proposal_id)).toThrow(ProposalLifecycleConflictError);
+      expect(() => service.validate(proposal.proposal_id)).toThrow(`status is ${status}`);
+      expect(db.getProposal(proposal.proposal_id)).toEqual(before);
+      expect(db.getTrip(demoTripId)).toEqual(tripBefore);
+      expect(db.listAuditForTrip(demoTripId)).toEqual(auditBefore);
+    }
+  );
 
   it('requires an explicit approval receipt before apply and creates a new version', () => {
     const db = new MemoryStore();
