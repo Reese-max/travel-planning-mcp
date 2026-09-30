@@ -1,0 +1,12 @@
+{
+  "repo": "Reese-max/travel-planning-mcp",
+  "issue": 10,
+  "base_sha": "ad599f384ba080c7314d2935e99a0c7ed43511e0",
+  "red_proof": "Before documentation fixes, Git Bash command npm test -- tests/quality-audit.test.ts exited 1: tests/quality-audit.test.ts (4 tests | 4 failed). FAIL preserves fixed persona needs instead of substituting unrelated API checks: F01 expected ' PASS ' to match /large text.*buttons/i. FAIL separates unexecuted regression paths from the tests that actually ran: report unexpectedly matched /apply-time regression coverage/. FAIL retains source caveats instead of claiming all hard constraints fail closed: C05 unexpectedly matched /hard constraints.*fail closed/. FAIL limits idempotency-key guarantees to REST rather than MCP: I01 did not match /\\bREST\\b/. Test Files 1 failed (1); Tests 4 failed (4).",
+  "test_command": "npm run check && npm run build",
+  "test_exit": 0,
+  "tests_passed": 58,
+  "tests_failed": 0,
+  "summary": "Restored the fixed A01-J05 needs from the pinned governing rules and marked unexecuted client, scale and endurance scenarios. Separated source review from executable coverage, disclosed hard-constraint caveats, and limited idempotency-key guarantees to REST. Added four documentation regressions, all demonstrated red before the correction. Windows Git Bash with Node 26.7.0 and npm 12.0.2 passed typecheck, all 58 tests across 8 files (54 existing product tests plus 4 documentation tests), and build.",
+  "not_done": "No push, merge, branch creation, external comments or issue writes. No product code changes: the pre-existing hard-constraint caveats are documented for separate product follow-up. Apply-time invalidation, rollback, REST malformed/oversized requests, live providers, real TRIP accounts, client accessibility, scale/endurance and full persona runtime acceptance remain unexecuted; the audit remains NOT CLEAN / 0/2."
+}

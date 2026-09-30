@@ -123,7 +123,7 @@ There is deliberately no MCP `approve_change_proposal` tool.
 
 ## Fixed 50-persona audit tracker
 
-The latest fixed A01–J05 audit is recorded in [`Round 2`](./.github/quality-audits/2026-09-30T0208Z-50-persona-audit-round-2.md). It found no new P0/P1/P2 finding and verifies the terminal-proposal regression covered by [Issue #5](https://github.com/Reese-max/travel-planning-mcp/issues/5). The status remains `NOT CLEAN / 0/2` because the governing audit rules require runtime evidence and two consecutive qualifying rounds; synthetic personas are not real-user validation.
+The latest fixed A01–J05 audit is recorded in [`Round 2`](./.github/quality-audits/2026-09-30T0208Z-50-persona-audit-round-2.md). It verifies the terminal-proposal regression covered by [Issue #5](https://github.com/Reese-max/travel-planning-mcp/issues/5) and separates each original persona need from source caveats and unexecuted scenarios. The status remains `NOT CLEAN / 0/2`; this bounded regression result does not establish complete persona coverage or real-user validation.
 
 ## REST API
 
