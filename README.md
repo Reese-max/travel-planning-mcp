@@ -121,6 +121,10 @@ Provider descriptors include a `live` flag. AI clients can call `get_provider_st
 
 There is deliberately no MCP `approve_change_proposal` tool.
 
+## Fixed 50-persona audit tracker
+
+The latest fixed A01–J05 audit is recorded in [`Round 2`](./.github/quality-audits/2026-09-30T0208Z-50-persona-audit-round-2.md). It found no new P0/P1/P2 finding and verifies the terminal-proposal regression covered by [Issue #5](https://github.com/Reese-max/travel-planning-mcp/issues/5). The status remains `NOT CLEAN / 0/2` because the governing audit rules require runtime evidence and two consecutive qualifying rounds; synthetic personas are not real-user validation.
+
 ## REST API
 
 A lightweight Node HTTP API exposes the same canonical service layer.
