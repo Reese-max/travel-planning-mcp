@@ -106,6 +106,7 @@ Provider descriptors include a `live` flag. AI clients can call `get_provider_st
 - `get_constraints`
 - `get_trip_audit`
 - `get_change_proposal`
+- `preview_external_trip_import` — read-only, redacted TRIP import preview; does not persist or authorize an import
 
 ### Planning
 
