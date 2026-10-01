@@ -138,11 +138,15 @@ describe('TRIP read-only integration', () => {
     expect(tripClientFromEnv({})).toBeUndefined();
     expect(() => tripClientFromEnv({ TRIP_API_URL: 'http://localhost:8080' })).toThrow(/together/);
   });
-  it('registers exactly two read-only tools and no upstream mutation tools', () => {
+  it('registers only read-only external tools and no upstream mutation tools', () => {
     const server = new McpServer({ name: 'test', version: '0.0.0' });
     const spy = vi.spyOn(server, 'registerTool');
     registerTripReadTools(server, setup().client);
-    expect(spy.mock.calls.map((call) => call[0])).toEqual(['list_external_trip_trips', 'get_external_trip_preview']);
+    expect(spy.mock.calls.map((call) => call[0])).toEqual([
+      'list_external_trip_trips',
+      'get_external_trip_preview',
+      'preview_external_trip_import'
+    ]);
     for (const call of spy.mock.calls) expect(call[1].annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
   });
 });

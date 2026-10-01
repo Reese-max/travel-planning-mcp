@@ -36,7 +36,8 @@ AI 讀取旅程脈絡；本階段不匯入、不寫回
 
 - `TripReadClient.listTrips(offset, limit)`：列出外部旅程，回傳來源、讀取時間與分頁資訊。
 - `TripReadClient.previewTrip(id)`：取得資料映射預覽、來源 fingerprint、缺漏與不能同步的欄位。
-- `list_external_trip_trips`、`get_external_trip_preview`：兩個可選的唯讀 MCP 工具。
+- `list_external_trip_trips`、`get_external_trip_preview`：唯讀研究工具。
+- `preview_external_trip_import`：回傳明確的 `source`、`source_trip_id`、`canonical_preview`、`unresolved_fields`、`warnings`、`conflicts` 匯入預覽；不持久化、不產生 Reservation、不授權匯入。
 - `src/trip-index.ts`：保留原有核心工具，僅在操作員設定完整時加掛 TRIP 工具。
 - `scripts/bootstrap-travel-workspace.mjs`：固定版本 clone、來源檢查、保留上游 remote、加入 App overlay。拒絕覆蓋既有資料夾。
 - `scripts/package-travel-workspace.py`：建立 App／Wanderlog 參考原始碼 ZIP 與 SHA-256 provenance。
@@ -55,6 +56,11 @@ AI 讀取旅程脈絡；本階段不匯入、不寫回
 | 原始備註、訂位代碼、附件與同行者身分 | 不送到 AI 預覽；只保留規劃所需名稱、時段與地點 |
 | 原始快照的 SHA-256 fingerprint | 僅可偵測讀取內容不同，**不是服務端交易版本／ETag**，不能宣稱解決競爭寫入 |
 | 上游回應缺欄位、錯誤或不一致 | 拒絕並回傳錯誤，不把失敗假裝成空旅程 |
+
+`preview_external_trip_import` 只把上述已正規化且可安全提供規劃的欄位放入
+`canonical_preview`。`unresolved_fields` 保留需要人工或正式匯入流程補齊的問題；
+`conflicts` 目前在一致的快照上為空，矛盾的來源資料會直接拒絕，避免產生看似
+可匯入但實際不可信的預覽。
 
 本階段刻意不產生完整 `Trip`／`Reservation` 假資料。要完成正式匯入，還需日期、時區、跨日邏輯、訂位起訖與歸屬授權等資料。
 
