@@ -24,13 +24,14 @@ TRIP App（原有 UI / POI / 行程 / 使用者資料庫）
 TripReadClient（驗證回應、遮蔽敏感欄位、保留未知資訊）
                  │
                  ▼
-Travel Planning MCP 的外部資料預覽工具
+Travel Planning MCP 的外部資料預覽工具（AI 唯讀）
                  │
+                 │  操作員帶著 review 過的 fingerprint 匯入（REST，需要 approval credential）
                  ▼
-AI 讀取旅程脈絡；本階段不匯入、不寫回
+Canonical Trip v1（import_source 記錄來源；後續變更仍走 ChangeProposal）
 ```
 
-**不改 TRIP 內部資料表，也不讓兩套資料庫同時成為同一旅程的權威來源。**此階段 TRIP 是來源；核心提供 derived preview，沒有偷偷建立新的 canonical Trip。既有核心 Demo Trip 仍維持原來的 Proposal/Approval 保護。
+**不改 TRIP 內部資料表，也不讓兩套資料庫同時成為同一旅程的權威來源。**匯入後 TRIP 仍是來源；核心保存 canonical Trip 並記錄來源身分與 fingerprint，**沒有任何寫回 TRIP 的路徑**。既有核心 Demo Trip 仍維持原來的 Proposal/Approval 保護。
 
 ## 已實作的功能
 
@@ -57,6 +58,33 @@ AI 讀取旅程脈絡；本階段不匯入、不寫回
 | 上游回應缺欄位、錯誤或不一致 | 拒絕並回傳錯誤，不把失敗假裝成空旅程 |
 
 本階段刻意不產生完整 `Trip`／`Reservation` 假資料。要完成正式匯入，還需日期、時區、跨日邏輯、訂位起訖與歸屬授權等資料。
+
+## 第二階段：受控匯入（canonical trip v1）
+
+匯入流程是 read → normalize → preview → **explicit import approval** → canonical Trip v1，
+入口只有 REST `POST /v1/external/trips/{externalTripId}/import`。
+
+| 匯入規則 | 實際處理 |
+|---|---|
+| 需要 `X-Approval-Key` 與 `Idempotency-Key` | 與 approve/apply/rollback 同一條 operator 憑證分界 |
+| 沒有 MCP 匯入工具 | AI client 不能把 preview 變成 canonical 資料 |
+| 伺服器端重新讀取來源 | 不接受呼叫端自帶 payload，避免匯入未經 review 的內容 |
+| 選擇性 `source_fingerprint` | 綁定操作員實際 review 過的快照；上游改了就回 `409 preview_stale` |
+| 重複匯入 | 同一份 fingerprint 再匯入回 `status: "duplicate"`，不產生第二個 canonical Trip |
+| 來源快照改變 | 回 conflict，不靜默覆蓋既有 canonical Trip |
+| `TripDay.dt` 為 null | 該日不匯入並回報 `MISSING_DATE`；完全沒有日期時整筆拒絕 |
+| `TripItem.time` 沒有時區 | 不推導 `start_at`；當地時間留在 `source_timing` 並回報 `TIMEZONE_UNKNOWN` |
+| `TripBooking` 沒有起訖時間 | 不生成 Reservation，也不預設 09:00；回報 `BOOKING_TIMING_UNKNOWN` |
+| 既有 canonical Place | 不覆蓋，讓操作員／使用者後來編輯的 metadata 留著 |
+| 匯入後 | `import_source` 記來源 provider／instance／trip id／fingerprint／`imported_at`／核准者，並寫 `external_trip_imported` audit event |
+| 之後的修改 | 只能走 `create_change_proposal → validate → 人類核准 → apply`，AI 不能直接改匯入後的 Trip |
+
+匯入回應固定回傳 `status`、`source`、`source_trip_id`、`source_fingerprint`、
+`imported_at`、`counts`、`unresolved_fields`、`warnings`、`conflicts`，讓 UI 可以直接顯示
+「匯入了什麼、還缺什麼」，而不是假裝資料完整。
+
+匯入 v1 之後仍**沒有**寫回 TRIP，也沒有 durable 的跨系統對照表；client fingerprint 只能
+偵測讀取內容不同，不能取代上游交易版本檢查。
 
 ## 安全邊界
 
@@ -94,14 +122,14 @@ docker compose -f docker-compose.travel.yml up -d --build
 ## 下一阶段驗收條件
 
 1. 在 GitHub 建立真正的 App Fork；設定 core/app 的上游更新策略。
-2. 建立受權的 import/link API、持久化對照表與正式時區／訂位模型。
+2. 已完成受控匯入（第二階段）；仍需 durable 的跨系統對照表、時區／訂位模型與上游授權檢查，才算完整匯入基礎。
 3. App 新增 Proposal 差異與批准畫面；批准能力不交給 AI。
 4. 在上游寫回端提供交易版本檢查或等效原子條件寫入；client fingerprint 不足以替代。
 5. 實測拒絕舊版、部分失敗、重試去重、回復；最後才開啟寫回與遠端 MCP。
 
 ## 驗證範圍
 
-新增測試使用合成 fixtures／mock transport，涵蓋 GET-only、資料遮蔽、來源 ID、時間缺漏、重複／矛盾資料、逾時、容量、錯誤、URL 安全與工具註冊。CI 的原始碼下載／打包是真實操作；Compose/Python 語法檢查不是前端建置或真實使用者旅程端到端驗收。這一輪沒有真實 TRIP 帳號、沒有外部旅程存取、沒有完成寫回，不能宣稱 production-ready。
+新增測試使用合成 fixtures／mock transport，涵蓋 GET-only、資料遮蔽、來源 ID、時間缺漏、重複／矛盾資料、逾時、容量、錯誤、URL 安全與工具註冊。匯入測試再涵蓋：需要明確核准、preview 契約與 instance 身分檢查、來源改變衝突、重複匯入冪等、不捏造日期／時區／Reservation、audit 與 `import_source`、canonical schema 不允許的額外欄位，以及 REST 匯入路由的 approval／idempotency／stale fingerprint／replay 行為。CI 的原始碼下載／打包是真實操作；Compose/Python 語法檢查不是前端建置或真實使用者旅程端到端驗收。這一輪沒有真實 TRIP 帳號、沒有外部旅程存取、沒有完成寫回，不能宣稱 production-ready。
 
 ## 上游依據
 

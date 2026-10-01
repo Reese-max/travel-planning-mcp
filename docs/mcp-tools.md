@@ -51,6 +51,8 @@ The following tools should not be added without a design review:
 - arbitrary shell execution
 - direct provider credential access
 - a tool that approves its own AI-generated proposal
+- an external trip import tool (import is an operator REST action behind the separate
+  approval credential; the TRIP bridge stays read-only)
 
 ## Typical flow
 

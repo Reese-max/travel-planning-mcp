@@ -2,7 +2,15 @@ import { timingSafeEqual } from 'node:crypto';
 import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { z } from 'zod';
 import { placeProvider } from '../adapters/demo-place-provider.js';
+import { tripClientFromEnv } from '../adapters/trip-client-env.js';
+import { TripReadClient, TripReadError } from '../adapters/trip-read-client.js';
 import type { ChangeOperation, TransportMode } from '../domain/types.js';
+import {
+  ExternalImportApprovalError,
+  ExternalImportConflictError,
+  ExternalImportPreviewError,
+  externalTripImportService
+} from '../services/external-trip-import-service.js';
 import { idempotencyService, IdempotencyConflictError } from '../services/idempotency-service.js';
 import { proposalService, ProposalLifecycleConflictError } from '../services/proposal-service.js';
 import { routeService } from '../services/route-service.js';
@@ -50,11 +58,20 @@ const rollbackSchema = z.object({
   actor_id: z.string().min(1)
 });
 
+const externalTripImportSchema = z.object({
+  actor_id: z.string().min(1),
+  traveler_display_name: z.string().min(1).max(200),
+  source_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  note: z.string().max(2000).optional()
+});
+
 export interface HttpServerOptions {
   host?: string;
   port?: number;
   travelApiKey?: string;
   approvalApiKey?: string;
+  /** Read-only external source used by the operator-approved import route. */
+  tripClient?: TripReadClient;
 }
 
 function isLoopback(host: string): boolean {
@@ -134,6 +151,9 @@ function parsePositiveInt(value: string | null): number | undefined {
 
 function errorStatus(error: unknown): number {
   if (error instanceof IdempotencyConflictError || error instanceof ProposalLifecycleConflictError) return 409;
+  if (error instanceof ExternalImportConflictError) return 409;
+  if (error instanceof ExternalImportApprovalError || error instanceof ExternalImportPreviewError) return 400;
+  if (error instanceof TripReadError) return 502;
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes('not found') || message.includes('not found:')) return 404;
   if (
@@ -193,6 +213,7 @@ export function createHttpServer(options: HttpServerOptions = {}) {
   const port = options.port ?? Number(process.env.PORT ?? 8787);
   const travelApiKey = options.travelApiKey ?? process.env.TRAVEL_API_KEY;
   const approvalApiKey = options.approvalApiKey ?? process.env.APPROVAL_API_KEY;
+  const tripClient = options.tripClient ?? tripClientFromEnv();
 
   if (!isLoopback(host) && !travelApiKey) {
     throw new Error('TRAVEL_API_KEY is required when binding the REST API to a non-loopback host.');
@@ -297,6 +318,54 @@ export function createHttpServer(options: HttpServerOptions = {}) {
           200,
           await routeService.estimate(body.from_place_id, body.to_place_id, body.mode as TransportMode)
         );
+        return;
+      }
+
+      if (
+        method === 'POST' &&
+        segments[0] === 'v1' &&
+        segments[1] === 'external' &&
+        segments[2] === 'trips' &&
+        segments[3] &&
+        segments[4] === 'import' &&
+        segments.length === 5
+      ) {
+        const externalTripId = Number(segments[3]);
+        if (!Number.isSafeInteger(externalTripId) || externalTripId <= 0) {
+          sendJson(res, 400, { error: 'invalid_request', message: 'external trip id must be a positive integer.' });
+          return;
+        }
+        if (!requireApproval(req, res, approvalApiKey)) return;
+        const key = requireIdempotencyKey(req, res);
+        if (!key) return;
+        if (!tripClient) {
+          sendJson(res, 503, { error: 'external_source_not_configured' });
+          return;
+        }
+        const body = externalTripImportSchema.parse(await readJson(req));
+        // Re-read the source server-side so a caller cannot import an unreviewed payload.
+        const preview = await tripClient.previewTrip(externalTripId);
+        if (body.source_fingerprint && body.source_fingerprint !== preview.source_fingerprint) {
+          sendJson(res, 409, {
+            error: 'preview_stale',
+            message: 'Source snapshot changed since the reviewed preview fingerprint.'
+          });
+          return;
+        }
+        const outcome = await idempotencyService.execute(
+          `import-external-trip:${preview.instance_id}:${externalTripId}`,
+          key,
+          body,
+          () => {
+            const report = externalTripImportService.importPreview(preview, {
+              actorId: body.actor_id,
+              travelerDisplayName: body.traveler_display_name,
+              ...(body.note !== undefined ? { note: body.note } : {})
+            });
+            return { status: report.status === 'imported' ? 201 : 200, body: report };
+          }
+        );
+        sendIdempotent(res, outcome);
         return;
       }
 

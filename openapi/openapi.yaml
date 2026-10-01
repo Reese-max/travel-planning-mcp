@@ -259,6 +259,52 @@ paths:
       responses:
         '200': { description: Route result with source and calculated_at metadata }
         '400': { $ref: '#/components/responses/BadRequest' }
+  /external/trips/{externalTripId}/import:
+    post:
+      summary: Import an operator-approved external trip snapshot as canonical trip v1
+      description: >-
+        Requires X-Approval-Key and Idempotency-Key. The source snapshot is re-read
+        server-side from the operator-configured TRIP instance, so a caller cannot
+        import an unreviewed payload. Optional source_fingerprint pins the reviewed
+        preview and returns 409 when the upstream snapshot changed. Unresolved
+        dates, timezones and booking times are reported instead of being invented,
+        and repeated imports of the same snapshot are reported as duplicates.
+      parameters:
+        - name: externalTripId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - $ref: '#/components/parameters/ApprovalKey'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actor_id, traveler_display_name]
+              properties:
+                actor_id: { type: string, minLength: 1 }
+                traveler_display_name: { type: string, minLength: 1, maxLength: 200 }
+                source_fingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+                note: { type: string, maxLength: 2000 }
+      responses:
+        '201':
+          description: Canonical trip v1 created from the reviewed snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExternalTripImportReport' }
+        '200':
+          description: The same snapshot was already imported; no second canonical trip was created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExternalTripImportReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ApprovalUnauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '502': { description: The external source could not be read }
+        '503': { description: The external source is not configured on this deployment }
   /proposals/{proposalId}:
     get:
       summary: Read a proposal
@@ -434,6 +480,53 @@ components:
                 type: [object, 'null']
                 additionalProperties: true
               reason: { type: [string, 'null'] }
+    ExternalTripImportReport:
+        type: object
+        required:
+          [status, source, instance_id, source_trip_id, source_fingerprint, imported_at, trip, counts, unresolved_fields, warnings, conflicts]
+        properties:
+          status: { enum: [imported, duplicate] }
+          source: { enum: [trip] }
+          instance_id: { type: string }
+          source_trip_id: { type: string }
+          source_fingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+          imported_at: { type: string, format: date-time }
+          trip:
+            type: object
+            required: [trip_id, version, title, start_date, end_date, status]
+            properties:
+              trip_id: { type: string, format: uuid }
+              version: { type: integer, minimum: 1 }
+              title: { type: string }
+              start_date: { type: string, format: date }
+              end_date: { type: string, format: date }
+              status: { type: string }
+          counts:
+            type: object
+            required: [places, days, items, reservations, unresolved_days, unresolved_bookings]
+            properties:
+              places: { type: integer, minimum: 0 }
+              days: { type: integer, minimum: 0 }
+              items: { type: integer, minimum: 0 }
+              reservations: { type: integer, enum: [0] }
+              unresolved_days: { type: integer, minimum: 0 }
+              unresolved_bookings: { type: integer, minimum: 0 }
+          unresolved_fields:
+            type: array
+            items:
+              type: object
+              required: [field, code, detail]
+              properties:
+                field: { type: string }
+                code:
+                  enum: [MISSING_DATE, BOOKING_TIMING_UNKNOWN, TIMEZONE_UNKNOWN]
+                detail: { type: string }
+          warnings:
+            type: array
+            items: { type: string }
+          conflicts:
+            type: array
+            items: { type: string }
   responses:
     BadRequest:
       description: Invalid request or missing required Idempotency-Key
