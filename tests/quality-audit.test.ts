@@ -13,7 +13,7 @@ const PERSONAS = [...'ABCDEFGHIJ'].flatMap((group) =>
 );
 const RESULTS = ['PASS', 'LIMITATION', 'RUNTIME GAP', 'OPEN FINDING'];
 const EXECUTED_COMMANDS = ['npm test', 'npm run check', 'npm run typecheck', 'npm run build'];
-const UNEXECUTED_LANGUAGE = /not exercised|not run|unexecuted|runtime gap|limitation|open finding/i;
+const UNEXECUTED_LANGUAGE = /\bnot exercised\b|\bnot run\b|\bunexecuted\b|\bnever executed\b/i;
 const KINDS = ['BUG', 'VALIDATION_GAP', 'MAINTENANCE', 'RESEARCH', 'OPPORTUNITY'];
 const TRIAGES = ['NEEDS_EVIDENCE', 'NEEDS_REVIEW', 'READY_FOR_IMPLEMENTATION', 'DEFERRED'];
 const SEVERITIES = /^(P[0-3]|NOT_ESTABLISHED)$/;
@@ -109,6 +109,13 @@ it('indexes every committed audit report and labels superseded persona rows', ()
   expect(reports.length).toBeGreaterThan(0);
   for (const report of reports) {
     expect.soft(tracker, `${report} must be indexed by the tracker`).toContain(report);
+  }
+  const referenced = [
+    ...new Set([...tracker.matchAll(/\.github\/quality-audits\/([\w.-]+\.md)/g)].map((match) => match[1]!))
+  ];
+  expect(referenced.length).toBeGreaterThan(0);
+  for (const report of referenced) {
+    expect.soft(existsSync(path(join(auditDir, report))), `linked report ${report} must exist`).toBe(true);
   }
   const withPersonaRows = reports.filter(
     (report) => personaRows(readFileSync(path(join(auditDir, report)), 'utf8')).length === 50
