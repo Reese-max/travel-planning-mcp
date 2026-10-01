@@ -130,13 +130,18 @@ REST action, so no MCP tool can import external data.
 `POST /v1/external/trips/:externalTripId/import` creates canonical trip v1 from an
 operator-configured TRIP snapshot after an explicit operator approval. It requires
 `X-Approval-Key` and `Idempotency-Key`, re-reads the source snapshot server-side, and
-never guesses: undated days are reported as `MISSING_DATE` and skipped, items without a
-timezone keep their local wall clock in `source_timing` and get no `start_at`, and TRIP
-bookings never become `Reservation`s because they carry no start time. The response
-reports `unresolved_fields`, `warnings`, and `counts`; repeating the same snapshot
-returns `status: "duplicate"` instead of creating a second canonical trip. Any later
-change to the imported trip must go through `create_change_proposal → validate →
+never guesses: undated days are reported as `MISSING_DATE` and skipped, source days that
+share a date are merged into one canonical day, items without a timezone keep their local
+wall clock in `source_timing` and get no `start_at`, and TRIP bookings never become
+`Reservation`s because they carry no start time. The response reports `unresolved_fields`
+(capped, with `counts.unresolved_total` for the full number), `warnings`, and `counts`;
+repeating the same snapshot returns `status: "duplicate"` instead of creating a second
+canonical trip, and a retry replays the stored response without re-reading the source.
+Any later change to the imported trip must go through `create_change_proposal → validate →
 approval → apply`.
+
+The route needs the operator-configured TRIP instance (`TRIP_API_URL`,
+`TRIP_API_TOKEN`, `TRIP_INSTANCE_ID`); it returns `503` when it is not configured.
 
 ## REST API
 

@@ -77,6 +77,22 @@ export class IdempotencyService {
     }
   }
 
+  /**
+   * Returns the stored response for an already-executed request without running the
+   * action, or undefined when the key is still unexecuted. A key reused with a
+   * different payload still fails, so this cannot be used to bypass the fingerprint.
+   */
+  replayIfStored<T>(
+    scope: string,
+    key: string | undefined,
+    payload: unknown
+  ): IdempotentResult<T> | undefined {
+    if (!key) return undefined;
+    const existing = this.db.getIdempotency(scope, key);
+    if (!existing) return undefined;
+    return this.replay<T>(scope, fingerprintPayload(payload), existing);
+  }
+
   private async executeFirst<T>(
     scope: string,
     key: string,

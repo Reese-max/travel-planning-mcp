@@ -7,9 +7,15 @@ import { TripReadClient, TripReadError } from './trip-read-client.js';
 export function tripClientFromEnv(env: NodeJS.ProcessEnv = process.env): TripReadClient | undefined {
   const values = [env.TRIP_API_URL, env.TRIP_API_TOKEN, env.TRIP_INSTANCE_ID];
   if (values.every((value) => !value)) return undefined;
-  if (values.some((value) => !value)) throw new TripReadError('CONFIG',
-    'Set TRIP_API_URL, TRIP_API_TOKEN and TRIP_INSTANCE_ID together, or leave all unset.');
+  if (values.some((value) => !value)) {
+    throw new TripReadError(
+      'CONFIG',
+      'Set TRIP_API_URL, TRIP_API_TOKEN and TRIP_INSTANCE_ID together, or leave all unset.'
+    );
+  }
   return new TripReadClient({
-    baseUrl: env.TRIP_API_URL!, apiToken: env.TRIP_API_TOKEN!, instanceId: env.TRIP_INSTANCE_ID!
+    baseUrl: env.TRIP_API_URL!,
+    apiToken: env.TRIP_API_TOKEN!,
+    instanceId: env.TRIP_INSTANCE_ID!
   });
 }

@@ -4,9 +4,13 @@ export const TRIP_INSTANCE_ID = 'primary';
 export const EXTERNAL_TRIP_ID = 12;
 
 export interface TripFixtureOptions {
+  id?: number;
   itemText?: string;
   undatedSecondDay?: boolean;
   allDaysUndated?: boolean;
+  sameDateSecondDay?: boolean;
+  archived?: boolean;
+  extraUndatedDays?: number;
 }
 
 /** Synthetic TRIP payload shaped like the pinned upstream contract. */
@@ -22,9 +26,9 @@ export function tripFixture(options: TripFixtureOptions = {}): Record<string, un
     visited: false
   };
   return {
-    id: EXTERNAL_TRIP_ID,
+    id: options.id ?? EXTERNAL_TRIP_ID,
     name: 'Synthetic trip',
-    archived: false,
+    archived: options.archived ?? false,
     currency: 'TWD',
     places: [museum],
     notes: 'PRIVATE-NOTE',
@@ -60,10 +64,24 @@ export function tripFixture(options: TripFixtureOptions = {}): Record<string, un
       {
         id: 21,
         label: 'Unscheduled',
-        dt: options.allDaysUndated === true || options.undatedSecondDay !== false ? null : '2026-10-21',
+        dt:
+          options.allDaysUndated === true || options.undatedSecondDay !== false
+            ? null
+            : options.sameDateSecondDay === true
+              ? '2026-10-20'
+              : '2026-10-21',
         items: [{ id: 31, day_id: 21, text: 'Undated idea', time: null, status: 'pending', place: null }],
         bookings: []
-      }
+      },
+      ...Array.from({ length: options.extraUndatedDays ?? 0 }, (_, index) => ({
+        id: 1000 + index,
+        label: `Bulk undated ${index}`,
+        dt: null,
+        items: [{ id: 2000 + index, day_id: 1000 + index, text: `Bulk idea ${index}`, time: null, status: 'pending', place: null }],
+        bookings: [
+          { id: 3000 + index, day_id: 1000 + index, label: `Bulk booking ${index}`, type: 'hotel' }
+        ]
+      }))
     ]
   };
 }

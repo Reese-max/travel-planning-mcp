@@ -343,6 +343,18 @@ export function createHttpServer(options: HttpServerOptions = {}) {
           return;
         }
         const body = externalTripImportSchema.parse(await readJson(req));
+        const scope = `import-external-trip:${externalTripId}`;
+        // A stored result wins before any upstream read, so a retry replays the
+        // original response instead of depending on current source state.
+        const stored = idempotencyService.replayIfStored(scope, key, body);
+        if (stored) {
+          sendIdempotent(res, stored);
+          return;
+        }
+        if (!tripClient) {
+          sendJson(res, 503, { error: 'external_source_not_configured' });
+          return;
+        }
         // Re-read the source server-side so a caller cannot import an unreviewed payload.
         const preview = await tripClient.previewTrip(externalTripId);
         if (body.source_fingerprint && body.source_fingerprint !== preview.source_fingerprint) {
@@ -352,19 +364,14 @@ export function createHttpServer(options: HttpServerOptions = {}) {
           });
           return;
         }
-        const outcome = await idempotencyService.execute(
-          `import-external-trip:${preview.instance_id}:${externalTripId}`,
-          key,
-          body,
-          () => {
-            const report = externalTripImportService.importPreview(preview, {
-              actorId: body.actor_id,
-              travelerDisplayName: body.traveler_display_name,
-              ...(body.note !== undefined ? { note: body.note } : {})
-            });
-            return { status: report.status === 'imported' ? 201 : 200, body: report };
-          }
-        );
+        const outcome = await idempotencyService.execute(scope, key, body, () => {
+          const report = externalTripImportService.importPreview(preview, {
+            actorId: body.actor_id,
+            travelerDisplayName: body.traveler_display_name,
+            ...(body.note !== undefined ? { note: body.note } : {})
+          });
+          return { status: report.status === 'imported' ? 201 : 200, body: report };
+        });
         sendIdempotent(res, outcome);
         return;
       }
@@ -540,7 +547,10 @@ export function createHttpServer(options: HttpServerOptions = {}) {
         return;
       }
       sendJson(res, errorStatus(error), {
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof ExternalImportPreviewError || error instanceof TripReadError
+          ? { code: error.code }
+          : {})
       });
     }
   });

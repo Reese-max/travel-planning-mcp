@@ -126,6 +126,78 @@ export interface ImportUnresolvedField {
   detail: string;
 }
 
+/** Unresolved source data is reported, not guessed; the list is capped and counted. */
+const MAX_REPORTED_UNRESOLVED_FIELDS = 100;
+
+interface UnresolvedReport {
+  fields: ImportUnresolvedField[];
+  total: number;
+  unresolved_days: number;
+  unresolved_bookings: number;
+  merged_days: number;
+}
+
+function collectUnresolved(snapshot: ExternalTripPreview): UnresolvedReport {
+  const all: ImportUnresolvedField[] = [];
+  let unresolvedBookings = 0;
+  let mergedDays = 0;
+  const datedDayCount = new Map<string, number>();
+
+  for (const day of snapshot.days) {
+    if (day.date === null) {
+      all.push({
+        field: `day:${day.external_day_id}.date`,
+        code: 'MISSING_DATE',
+        detail: 'Source day has no date; the day was not imported and no date was inferred.'
+      });
+      for (const item of day.items) {
+        all.push({
+          field: `item:${item.external_item_id}`,
+          code: 'MISSING_DATE',
+          detail: 'Item belongs to an undated day; it was not imported and no date was inferred.'
+        });
+      }
+    } else {
+      const seen = datedDayCount.get(day.date) ?? 0;
+      datedDayCount.set(day.date, seen + 1);
+      if (seen > 0) mergedDays += 1;
+    }
+    for (const booking of day.unresolved_bookings) {
+      unresolvedBookings += 1;
+      all.push({
+        field: `booking:${booking.external_booking_id}`,
+        code: 'BOOKING_TIMING_UNKNOWN',
+        detail: 'Source booking has no start/end time; no Reservation was created.'
+      });
+    }
+    if (day.date === null) continue;
+    for (const item of day.items) {
+      if (item.timezone !== null) continue;
+      all.push({
+        field: `item:${item.external_item_id}.start_at`,
+        code: 'TIMEZONE_UNKNOWN',
+        detail: 'Source time is local wall clock without a timezone; no absolute start time was derived.'
+      });
+    }
+  }
+
+  const fields = all.slice(0, MAX_REPORTED_UNRESOLVED_FIELDS);
+  if (all.length > fields.length) {
+    fields.push({
+      field: 'unresolved_fields',
+      code: 'UNRESOLVED_TRUNCATED',
+      detail: `${all.length - fields.length} further unresolved source fields were counted but not listed.`
+    });
+  }
+  return {
+    fields,
+    total: all.length,
+    unresolved_days: snapshot.days.filter((day) => day.date === null).length,
+    unresolved_bookings: unresolvedBookings,
+    merged_days: mergedDays
+  };
+}
+
 export interface ExternalTripImportReport {
   status: 'imported' | 'duplicate';
   source: 'trip';
@@ -145,9 +217,10 @@ export interface ExternalTripImportReport {
     places: number;
     days: number;
     items: number;
-    reservations: 0;
+    reservations: number;
     unresolved_days: number;
     unresolved_bookings: number;
+    unresolved_total: number;
   };
   unresolved_fields: ImportUnresolvedField[];
   warnings: string[];
@@ -256,64 +329,36 @@ export class ExternalTripImportService {
       return this.duplicateReport(snapshot, existing);
     }
 
-    const unresolvedFields: ImportUnresolvedField[] = [];
     const datedDays = snapshot.days.filter((day): day is typeof day & { date: string } => day.date !== null);
-    for (const day of snapshot.days) {
-      if (day.date !== null) continue;
-      unresolvedFields.push({
-        field: `day:${day.external_day_id}.date`,
-        code: 'MISSING_DATE',
-        detail: 'Source day has no date; the day was not imported and no date was inferred.'
-      });
-      for (const item of day.items) {
-        unresolvedFields.push({
-          field: `item:${item.external_item_id}`,
-          code: 'MISSING_DATE',
-          detail: 'Item belongs to an undated day; it was not imported and no date was inferred.'
-        });
-      }
-    }
-    for (const day of snapshot.days) {
-      for (const booking of day.unresolved_bookings) {
-        unresolvedFields.push({
-          field: `booking:${booking.external_booking_id}`,
-          code: 'BOOKING_TIMING_UNKNOWN',
-          detail: 'Source booking has no start/end time; no Reservation was created.'
-        });
-      }
-    }
     if (datedDays.length === 0) {
       throw new ExternalImportConflictError(
         `TRIP trip ${snapshot.external_trip_id} has no day with a resolvable date; refusing to invent a travel window.`
       );
     }
+    const unresolved = collectUnresolved(snapshot);
 
-    const placeIds = new Set<string>();
+    // Places are written before the trip on purpose: an orphaned provider place is a
+    // harmless leftover that a retry repairs, while a trip referencing missing places
+    // would not be. A durable TravelStore must still wrap these writes transactionally.
     for (const place of snapshot.places) {
       if (!this.db.getPlace(place.place_id)) this.db.savePlace(canonicalPlace(place));
-      placeIds.add(place.place_id);
     }
 
-    const dates = datedDays.map((day) => day.date).sort();
+    const dates = [...new Set(datedDays.map((day) => day.date))].sort();
     const startDate = dates[0]!;
     const endDate = dates[dates.length - 1]!;
     const importedAt = new Date().toISOString();
 
-    let itemCount = 0;
-    const days = datedDays.map((day) => ({
-      date: day.date,
-      items: day.items.map((item) => {
-        itemCount += 1;
-        if (item.timezone === null) {
-          unresolvedFields.push({
-            field: `item:${item.external_item_id}.start_at`,
-            code: 'TIMEZONE_UNKNOWN',
-            detail: 'Source time is local wall clock without a timezone; no absolute start time was derived.'
-          });
-        }
-        return this.canonicalItem(item, day.date);
-      })
-    }));
+    // The canonical model has one day per date, so same-dated source days are merged
+    // instead of producing a trip the validator would permanently reject.
+    const itemsByDate = new Map<string, TripItem[]>();
+    for (const day of datedDays) {
+      const items = itemsByDate.get(day.date) ?? [];
+      for (const item of day.items) items.push(this.canonicalItem(item, day.date));
+      itemsByDate.set(day.date, items);
+    }
+    const itemCount = [...itemsByDate.values()].reduce((total, items) => total + items.length, 0);
+    const days = dates.map((date) => ({ date, items: itemsByDate.get(date) ?? [] }));
 
     const trip: Trip = {
       trip_id: snapshot.mapped_trip_id,
@@ -322,7 +367,7 @@ export class ExternalTripImportService {
       description: null,
       start_date: startDate,
       end_date: endDate,
-      status: 'draft',
+      status: snapshot.archived ? 'archived' : 'draft',
       travelers: [
         { traveler_id: randomUUID(), display_name: travelerDisplayName, role: 'owner' }
       ],
@@ -355,6 +400,7 @@ export class ExternalTripImportService {
       (total, day) => total + day.unresolved_bookings.length,
       0
     );
+    const mergedDays = unresolved.merged_days;
     this.db.appendAudit({
       event_id: randomUUID(),
       event_type: 'external_trip_imported',
@@ -370,13 +416,21 @@ export class ExternalTripImportService {
         imported_at: importedAt,
         approved_by: actorId,
         places: snapshot.places.length,
-        days: datedDays.length,
+        days: days.length,
+        source_days: datedDays.length,
         items: itemCount,
         reservations: 0,
         unresolved_days: snapshot.days.length - datedDays.length,
-        unresolved_bookings: unresolvedBookings
+        unresolved_bookings: unresolved.unresolved_bookings
       }
     });
+
+    const mergedDayWarnings =
+      mergedDays > 0
+        ? [
+            `${mergedDays} source day(s) shared a date with another day; their items were merged into one canonical day.`
+          ]
+        : [];
 
     return {
       status: 'imported',
@@ -395,14 +449,15 @@ export class ExternalTripImportService {
       },
       counts: {
         places: snapshot.places.length,
-        days: datedDays.length,
+        days: days.length,
         items: itemCount,
         reservations: 0,
         unresolved_days: snapshot.days.length - datedDays.length,
-        unresolved_bookings: unresolvedBookings
+        unresolved_bookings: unresolved.unresolved_bookings,
+        unresolved_total: unresolved.total
       },
-      unresolved_fields: unresolvedFields,
-      warnings: [...IMPORT_WARNINGS],
+      unresolved_fields: unresolved.fields,
+      warnings: [...IMPORT_WARNINGS, ...mergedDayWarnings],
       conflicts: []
     };
   }
@@ -431,6 +486,9 @@ export class ExternalTripImportService {
     snapshot: ExternalTripPreview,
     existing: Trip
   ): ExternalTripImportReport {
+    // Unresolved counts describe the source snapshot, so both paths report the same
+    // numbers; canonical counts describe the stored trip, which may have moved on.
+    const unresolved = collectUnresolved(snapshot);
     return {
       status: 'duplicate',
       source: snapshot.provider,
@@ -450,11 +508,12 @@ export class ExternalTripImportService {
         places: existing.place_ids?.length ?? 0,
         days: existing.days.length,
         items: existing.days.reduce((total, day) => total + day.items.length, 0),
-        reservations: 0,
-        unresolved_days: 0,
-        unresolved_bookings: 0
+        reservations: existing.reservation_ids?.length ?? 0,
+        unresolved_days: unresolved.unresolved_days,
+        unresolved_bookings: unresolved.unresolved_bookings,
+        unresolved_total: unresolved.total
       },
-      unresolved_fields: [],
+      unresolved_fields: unresolved.fields,
       warnings: [
         ...IMPORT_WARNINGS,
         'This source snapshot was already imported; no second canonical trip was created.'
@@ -502,7 +561,7 @@ export class ExternalTripImportService {
 
     const dayIds = new Set<number>();
     const itemIds = new Set<string>();
-    const bookingIds = new Set<string>();
+    const bookingIds = new Set<number>();
     for (const day of snapshot.days) {
       if (dayIds.has(day.external_day_id)) {
         throw new ExternalImportPreviewError('DUPLICATE_ID', 'Preview contains a duplicate day ID.');
@@ -533,10 +592,19 @@ export class ExternalTripImportService {
         }
       }
       for (const booking of day.unresolved_bookings) {
-        if (bookingIds.has(booking.mapped_reservation_id)) {
+        if (bookingIds.has(booking.external_booking_id)) {
           throw new ExternalImportPreviewError('DUPLICATE_ID', 'Preview contains a duplicate booking ID.');
         }
-        bookingIds.add(booking.mapped_reservation_id);
+        bookingIds.add(booking.external_booking_id);
+        if (
+          booking.mapped_reservation_id !==
+          tripExternalId(snapshot.instance_id, 'reservation', booking.external_booking_id)
+        ) {
+          throw new ExternalImportPreviewError(
+            'IDENTITY_MISMATCH',
+            'Preview booking mapping does not match the operator-configured TRIP instance.'
+          );
+        }
       }
     }
   }

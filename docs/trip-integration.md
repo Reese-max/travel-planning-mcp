@@ -73,6 +73,7 @@ Canonical Trip v1（import_source 記錄來源；後續變更仍走 ChangePropos
 | 重複匯入 | 同一份 fingerprint 再匯入回 `status: "duplicate"`，不產生第二個 canonical Trip |
 | 來源快照改變 | 回 conflict，不靜默覆蓋既有 canonical Trip |
 | `TripDay.dt` 為 null | 該日不匯入並回報 `MISSING_DATE`；完全沒有日期時整筆拒絕 |
+| 多個 `TripDay` 共用同一日期 | 合併成一個 canonical day 並在 `warnings` 說明，避免匯出後整個 Trip 永遠無法通過驗證 |
 | `TripItem.time` 沒有時區 | 不推導 `start_at`；當地時間留在 `source_timing` 並回報 `TIMEZONE_UNKNOWN` |
 | `TripBooking` 沒有起訖時間 | 不生成 Reservation，也不預設 09:00；回報 `BOOKING_TIMING_UNKNOWN` |
 | 既有 canonical Place | 不覆蓋，讓操作員／使用者後來編輯的 metadata 留著 |
@@ -81,7 +82,8 @@ Canonical Trip v1（import_source 記錄來源；後續變更仍走 ChangePropos
 
 匯入回應固定回傳 `status`、`source`、`source_trip_id`、`source_fingerprint`、
 `imported_at`、`counts`、`unresolved_fields`、`warnings`、`conflicts`，讓 UI 可以直接顯示
-「匯入了什麼、還缺什麼」，而不是假裝資料完整。
+「匯入了什麼、還缺什麼」，而不是假裝資料完整。`unresolved_fields` 最多列 100 筆，
+超過的以 `UNRESOLVED_TRUNCATED` 標記，完整數量看 `counts.unresolved_total`。
 
 匯入 v1 之後仍**沒有**寫回 TRIP，也沒有 durable 的跨系統對照表；client fingerprint 只能
 偵測讀取內容不同，不能取代上游交易版本檢查。

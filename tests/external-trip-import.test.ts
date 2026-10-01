@@ -9,6 +9,7 @@ import {
   ExternalTripImportService
 } from '../src/services/external-trip-import-service.js';
 import { MemoryStore } from '../src/store/memory-store.js';
+import { ProposalService } from '../src/services/proposal-service.js';
 import {
   EXTERNAL_TRIP_ID,
   TRIP_INSTANCE_ID,
@@ -125,7 +126,85 @@ describe('canonical external trip import', () => {
     expect(codes).toContain('TIMEZONE_UNKNOWN');
     expect(report.warnings.some((warning) => /not live verification/i.test(warning))).toBe(true);
     expect(report.conflicts).toEqual([]);
-    expect(JSON.stringify(trip)).not.toContain('PRIVATE-');
+    const stored = JSON.stringify([trip, snapshot.places, report, db.listAuditForTrip(trip.trip_id)]);
+    expect(stored).not.toContain('PRIVATE-');
+  });
+
+  it('merges source days that share a date so the canonical trip stays validatable', async () => {
+    const snapshot = await previewFromSource(
+      tripFixture({ undatedSecondDay: false, sameDateSecondDay: true })
+    );
+    const { db, service } = serviceWith();
+
+    const report = service.importPreview(snapshot, APPROVAL);
+    const trip = db.getTrip(report.trip.trip_id)!;
+    expect(trip.days).toHaveLength(1);
+    expect(trip.days[0]!.items).toHaveLength(2);
+    expect(new Set(trip.days.map((day) => day.date)).size).toBe(trip.days.length);
+    expect(report.warnings.some((warning) => /merged into one canonical day/.test(warning))).toBe(true);
+
+    const proposals = new ProposalService(db);
+    // The unlocked item is used on purpose: imported "booked" items stay locked, so a
+    // proposal touching them must still fail closed.
+    const proposal = proposals.create({
+      tripId: trip.trip_id,
+      operations: [
+        {
+          operation: 'update',
+          target_type: 'trip_item',
+          target_id: trip.days[0]!.items[1]!.item_id,
+          to: { notes: 'Reviewed after import' }
+        }
+      ]
+    });
+    expect(proposals.validate(proposal.proposal_id).validation).toMatchObject({ valid: true });
+
+    const lockedProposal = proposals.create({
+      tripId: trip.trip_id,
+      operations: [
+        {
+          operation: 'update',
+          target_type: 'trip_item',
+          target_id: trip.days[0]!.items[0]!.item_id,
+          to: { notes: 'Must stay locked' }
+        }
+      ]
+    });
+    expect(proposals.validate(lockedProposal.proposal_id).validation).toMatchObject({
+      valid: false,
+      hard_constraint_violations: [expect.stringContaining('is locked or fixed')]
+    });
+  });
+
+  it('keeps an archived source trip archived instead of silently reactivating it', async () => {
+    const snapshot = await previewFromSource(tripFixture({ archived: true }));
+    const { db, service } = serviceWith();
+
+    const report = service.importPreview(snapshot, APPROVAL);
+    expect(report.trip.status).toBe('archived');
+    expect(db.getTrip(report.trip.trip_id)!.status).toBe('archived');
+  });
+
+  it('rejects a forged booking identity mapping', async () => {
+    const { db, service } = serviceWith();
+    const snapshot = await preview();
+    snapshot.days[0]!.unresolved_bookings[0]!.mapped_reservation_id =
+      '44444444-4444-4444-8444-444444444444';
+
+    expect(() => service.importPreview(snapshot, APPROVAL)).toThrow(ExternalImportPreviewError);
+    expect(db.getTrip(snapshot.mapped_trip_id)).toBeUndefined();
+  });
+
+  it('caps the unresolved report while still counting every unresolved field', async () => {
+    const snapshot = await previewFromSource(tripFixture({ extraUndatedDays: 120 }));
+    const { service } = serviceWith();
+
+    const report = service.importPreview(snapshot, APPROVAL);
+    expect(report.unresolved_fields).toHaveLength(101);
+    expect(report.unresolved_fields.at(-1)).toMatchObject({ code: 'UNRESOLVED_TRUNCATED' });
+    expect(report.counts.unresolved_total).toBeGreaterThan(report.unresolved_fields.length);
+    expect(report.counts.unresolved_days).toBe(121);
+    expect(report.counts.unresolved_bookings).toBe(121);
   });
 
   it('is idempotent for the same snapshot and refuses a silent re-import of changed source data', async () => {
@@ -147,6 +226,26 @@ describe('canonical external trip import', () => {
     expect(() => service.importPreview(changed, APPROVAL)).toThrow(ExternalImportConflictError);
     expect(db.getTrip(first.trip.trip_id)!.version).toBe(1);
     expect(db.listAuditForTrip(first.trip.trip_id)).toHaveLength(1);
+  });
+
+  it('reports the current canonical state on a duplicate instead of stale zeros', async () => {
+    const snapshot = await preview();
+    const { db, service } = serviceWith();
+    const first = service.importPreview(snapshot, APPROVAL);
+
+    const current = db.getTrip(first.trip.trip_id)!;
+    db.saveTrip({
+      ...current,
+      version: 2,
+      reservation_ids: ['55555555-5555-4555-8555-555555555555']
+    });
+
+    const second = service.importPreview(snapshot, APPROVAL);
+    expect(second.counts.reservations).toBe(1);
+    expect(second.counts.days).toBe(current.days.length);
+    expect(second.counts.unresolved_days).toBe(first.counts.unresolved_days);
+    expect(second.counts.unresolved_bookings).toBe(first.counts.unresolved_bookings);
+    expect(second.counts.unresolved_total).toBe(first.counts.unresolved_total);
   });
 
   it('refuses to import when no day carries a resolvable date', async () => {

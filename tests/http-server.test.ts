@@ -11,11 +11,15 @@ const TOKYO_STATION_ID = '22222222-2222-4222-8222-222222222222';
 const SENSOJI_ID = '33333333-3333-4333-8333-333333333333';
 const FLIGHT_RESERVATION_ID = '44444444-4444-4444-8444-444444444444';
 
+let transport: (options: { id?: number }) => Promise<Response> = async () =>
+  jsonResponse(tripFixture());
+
 const tripClient = new TripReadClient({
   baseUrl: 'https://trip.example.test',
   apiToken: 'TEST-SECRET',
   instanceId: 'http-instance',
-  fetchImpl: (async () => jsonResponse(tripFixture())) as unknown as typeof fetch
+  fetchImpl: (async (url: URL) =>
+    transport({ id: Number(url.pathname.split('/').pop()) })) as unknown as typeof fetch
 });
 
 const instance = createHttpServer({
@@ -52,6 +56,29 @@ async function authorizedFetch(path: string, init: RequestInit = {}) {
       ...(init.headers ?? {})
     }
   });
+}
+
+async function withServer(
+  run: (url: string) => Promise<void>
+): Promise<void> {
+  const extra = createHttpServer({
+    host: '127.0.0.1',
+    port: 0,
+    travelApiKey: READ_KEY,
+    approvalApiKey: APPROVAL_KEY
+  });
+  await new Promise<void>((resolve, reject) => {
+    extra.server.once('error', reject);
+    extra.server.listen(0, '127.0.0.1', () => resolve());
+  });
+  const address = extra.server.address() as AddressInfo;
+  try {
+    await run(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      extra.server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
 }
 
 describe('Travel Planning REST API', () => {
@@ -372,5 +399,77 @@ describe('Travel Planning REST API', () => {
     const duplicateReport = (await duplicate.json()) as { status: string; trip: { trip_id: string } };
     expect(duplicateReport.status).toBe('duplicate');
     expect(duplicateReport.trip.trip_id).toBe(report.trip.trip_id);
+  });
+
+  it('replays a stored import response even when the source became unreadable', async () => {
+    const previous = transport;
+    const path = '/v1/external/trips/13/import';
+    const body = JSON.stringify({ actor_id: 'operator', traveler_display_name: 'Trip Owner' });
+    transport = async ({ id }) => jsonResponse(tripFixture({ id }));
+
+    try {
+      const first = await authorizedFetch(path, {
+        method: 'POST',
+        headers: { 'x-approval-key': APPROVAL_KEY, 'idempotency-key': 'import-replay-13' },
+        body
+      });
+      expect(first.status).toBe(201);
+      const firstBody = await first.json();
+
+      transport = async () => new Response('upstream exploded', { status: 500 });
+
+      const replay = await authorizedFetch(path, {
+        method: 'POST',
+        headers: { 'x-approval-key': APPROVAL_KEY, 'idempotency-key': 'import-replay-13' },
+        body
+      });
+      expect(replay.status).toBe(201);
+      expect(replay.headers.get('idempotent-replayed')).toBe('true');
+      expect(await replay.json()).toEqual(firstBody);
+
+      const reusedKey = await authorizedFetch(path, {
+        method: 'POST',
+        headers: { 'x-approval-key': APPROVAL_KEY, 'idempotency-key': 'import-replay-13' },
+        body: JSON.stringify({ actor_id: 'someone-else', traveler_display_name: 'Trip Owner' })
+      });
+      expect(reusedKey.status).toBe(409);
+    } finally {
+      transport = previous;
+    }
+  });
+
+  it('reports upstream read failures with a machine-readable code', async () => {
+    const previous = transport;
+    transport = async () => new Response('upstream exploded', { status: 500 });
+    try {
+      const response = await authorizedFetch('/v1/external/trips/14/import', {
+        method: 'POST',
+        headers: { 'x-approval-key': APPROVAL_KEY, 'idempotency-key': 'import-upstream-500' },
+        body: JSON.stringify({ actor_id: 'operator', traveler_display_name: 'Trip Owner' })
+      });
+      expect(response.status).toBe(502);
+      const body = (await response.json()) as { code?: string; error?: string };
+      expect(body.code).toBe('HTTP_500');
+      expect(body.error).not.toContain('upstream exploded');
+    } finally {
+      transport = previous;
+    }
+  });
+
+  it('refuses to import when no external source is configured on the deployment', async () => {
+    await withServer(async (url) => {
+      const response = await fetch(`${url}/v1/external/trips/12/import`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${READ_KEY}`,
+          'x-approval-key': APPROVAL_KEY,
+          'idempotency-key': 'import-unconfigured-source',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ actor_id: 'operator', traveler_display_name: 'Trip Owner' })
+      });
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ error: 'external_source_not_configured' });
+    });
   });
 });

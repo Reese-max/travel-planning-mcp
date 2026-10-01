@@ -304,7 +304,10 @@ paths:
         '403': { $ref: '#/components/responses/ApprovalUnauthorized' }
         '409': { $ref: '#/components/responses/Conflict' }
         '502': { description: The external source could not be read }
-        '503': { description: The external source is not configured on this deployment }
+        '503':
+          description: >-
+            The external source is not configured on this deployment, or the operator
+            approval credential is disabled.
   /proposals/{proposalId}:
     get:
       summary: Read a proposal
@@ -503,14 +506,16 @@ components:
               status: { type: string }
           counts:
             type: object
-            required: [places, days, items, reservations, unresolved_days, unresolved_bookings]
+            required:
+              [places, days, items, reservations, unresolved_days, unresolved_bookings, unresolved_total]
             properties:
               places: { type: integer, minimum: 0 }
               days: { type: integer, minimum: 0 }
               items: { type: integer, minimum: 0 }
-              reservations: { type: integer, enum: [0] }
+              reservations: { type: integer, minimum: 0 }
               unresolved_days: { type: integer, minimum: 0 }
               unresolved_bookings: { type: integer, minimum: 0 }
+              unresolved_total: { type: integer, minimum: 0 }
           unresolved_fields:
             type: array
             items:
@@ -519,7 +524,8 @@ components:
               properties:
                 field: { type: string }
                 code:
-                  enum: [MISSING_DATE, BOOKING_TIMING_UNKNOWN, TIMEZONE_UNKNOWN]
+                  enum:
+                    [MISSING_DATE, BOOKING_TIMING_UNKNOWN, TIMEZONE_UNKNOWN, UNRESOLVED_TRUNCATED]
                 detail: { type: string }
           warnings:
             type: array
