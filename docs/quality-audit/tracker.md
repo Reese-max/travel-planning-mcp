@@ -61,17 +61,17 @@ affects the persona).
 | A05 | visual learner, relies on clear navigation and status cues | RUNTIME GAP | Lifecycle status text is asserted in `tests/proposal-service.test.ts`; client navigation and visual cues were not exercised. |
 | B01 | administrator, fluent in Excel, unfamiliar with programming | RUNTIME GAP | `openapi/openapi.yaml` and `examples/` describe the read/propose/approve split; a spreadsheet-driven administrative run was not exercised. |
 | B02 | junior engineer, values installation and error messages | RUNTIME GAP | `README.md` documents installation and `src/http/server.ts` returns typed JSON errors; the inbound malformed and oversized request path has no fixture in `tests/http-server.test.ts`. |
-| B03 | designer, values UI consistency and reversible actions | OPEN FINDING | Reversal is only covered in `src/services/proposal-service.ts` and `tests/proposal-service.test.ts`; rollback has no regression fixture — see F-02. |
+| B03 | designer, values UI consistency and reversible actions | OPEN FINDING | Reversal is only exercised in `src/services/proposal-service.ts` and `tests/proposal-service.test.ts`; rollback has no regression fixture — see F-02. |
 | B04 | research assistant, values data sources and export | LIMITATION | `src/domain/types.ts` keeps provider and source metadata and `tests/google-providers.test.ts` covers normalization; the repository exposes no export workflow at all. |
 | B05 | shift worker, mobile and fragmented-time use | LIMITATION | `src/store/memory-store.ts` is in-memory, so an interrupted session loses state; disclosed under `README.md` current limitations. |
 | C01 | police/civil-service user, values correctness and audit trail | PASS | `tests/proposal-service.test.ts`, `tests/mcp-proposal-validation.test.ts` and `tests/store-invariants.test.ts` keep audit events and approval receipts stable across refused revalidation; `npm test`. |
 | C02 | teacher, values multi-user use and low learning cost | LIMITATION | `docs/security-model.md` documents bootstrap API-key auth only; no user ACL or OAuth exists. |
 | C03 | medical/high-risk user, values disclaimer, sources and error protection | PASS | `src/services/proposal-service.ts` and `tests/store-invariants.test.ts` reject fixed-reservation mutation, rebinding and timing changes; `npm test`. |
-| C04 | content creator, values uninterrupted long flows and version recovery | OPEN FINDING | Version creation is covered in `tests/proposal-service.test.ts`, but the recovery half of the need is rollback, which has no fixture — see F-02. |
+| C04 | content creator, values uninterrupted long flows and version recovery | OPEN FINDING | Version creation is asserted in `tests/proposal-service.test.ts`, but the recovery half of the need is rollback, which has no fixture — see F-02. |
 | C05 | DevOps/SRE, values observability, fail-closed behaviour and rollback | OPEN FINDING | Hard constraints are silently skipped when required parameters are missing, and a hard budget degrades to a warning on mixed currencies in `src/services/proposal-service.ts` — see F-01. Rollback coverage is F-02. |
 | D01 | unit manager, reads summaries and exceptions only | PASS | `src/services/trip-context-service.ts` aggregates trip state and `tests/http-server.test.ts` asserts the context response; `npm test`. |
 | D02 | project manager, values progress, ownership and traceability | PASS | `src/store/memory-store.ts` records audit events and `tests/proposal-service.test.ts` asserts protected lifecycle states; `npm test`. |
-| D03 | IT administrator, values permissions, backup and deployment | LIMITATION | `src/http/server.ts` refuses a non-loopback bind without `TRAVEL_API_KEY`, covered by `tests/http-server.test.ts`; backup and deployment recovery are outside the MVP. |
+| D03 | IT administrator, values permissions, backup and deployment | LIMITATION | `src/http/server.ts` refuses a non-loopback bind without `TRAVEL_API_KEY`, but `tests/http-server.test.ts` only binds `127.0.0.1`, so the guard is source-reviewed — see F-03. Backup and deployment recovery are outside the MVP. |
 | D04 | procurement/cost-sensitive user, values cost estimate and caps | RUNTIME GAP | `src/adapters/google-place-provider.ts` limits cost through an explicit field mask as described in `docs/live-providers.md`; live cost and quota behaviour were not exercised. |
 | D05 | legal-compliance/audit role, values data retention, privacy and operation evidence | LIMITATION | `tests/trip-read-client.test.ts` proves upstream notes, attachments and identities are never published; retention itself is in-memory. |
 | E01 | general office worker, rarely uses modern web UI | RUNTIME GAP | `README.md` documents the localhost curl path; a beginner client run was not exercised. |
@@ -113,12 +113,13 @@ Calibrated with the pinned issue-quality rules. No entry authorizes implementati
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | F-01 | BUG | P2 | SOURCE_CONFIRMED | NEEDS_REVIEW | false | A hard constraint is skipped instead of blocking when its required parameters are missing, and a hard daily budget is downgraded to a soft warning when currencies are mixed. `AGENTS.md` invariant 4 requires a hard constraint to block apply when it cannot be evaluated safely. | src/services/proposal-service.ts |
 | F-02 | VALIDATION_GAP | NOT_ESTABLISHED | SOURCE_CONFIRMED | NEEDS_EVIDENCE | false | Operator rollback is the documented recovery path for a reversible change, but no test file references rollback, so its new-version creation and idempotent replay are source-reviewed only. Impact is not established; the missing evidence blocks CLEAN. | src/services/proposal-service.ts |
+| F-03 | VALIDATION_GAP | NOT_ESTABLISHED | SOURCE_CONFIRMED | NEEDS_EVIDENCE | false | The non-loopback bind guard that requires `TRAVEL_API_KEY` is a fail-closed security boundary, but every HTTP test binds `127.0.0.1`, so the refusal path has no fixture. Impact is not established; the missing evidence blocks CLEAN. | src/http/server.ts |
 
 ## CLEAN accounting
 
 The repository is **NOT CLEAN / 0/2**:
 
-1. F-01 is an open P2 product finding and F-02 is an open validation gap.
+1. F-01 is an open P2 product finding, and F-02 and F-03 are open validation gaps.
 2. Runtime evidence is incomplete for live providers, a real external TRIP account, browser and mobile
    clients, remote multi-user deployment and large or endurance workloads.
 3. No two consecutive qualifying CLEAN rounds exist for this repository.
@@ -126,6 +127,6 @@ The repository is **NOT CLEAN / 0/2**:
 
 ## Next round
 
-Re-run the same 50 needs against the new default-branch SHA after F-01 and F-02 have an owner, then
+Re-run the same 50 needs against the new default-branch SHA after F-01, F-02 and F-03 have an owner, then
 record the result as a new report under `.github/quality-audits/` and add it to the index above. Do
 not rewrite this tracker or any earlier report to reach CLEAN.

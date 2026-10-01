@@ -20,7 +20,9 @@ portfolio rules so that results stay comparable across rounds.
 
 Editing a persona ID, its identity, or its need invalidates cross-round comparison and is not
 allowed without a new baseline file and a new pinned blob reference. The English column is a
-translation aid only; when the two disagree, the pinned zh-Hant column wins.
+translation aid only; when the two disagree, the pinned zh-Hant column wins. The zh-Hant column
+reproduces the upstream persona text with its trailing `。` removed so the table stays one line per
+persona; no wording is changed.
 
 ## Groups
 

@@ -14,6 +14,9 @@ const PERSONAS = [...'ABCDEFGHIJ'].flatMap((group) =>
 const RESULTS = ['PASS', 'LIMITATION', 'RUNTIME GAP', 'OPEN FINDING'];
 const EXECUTED_COMMANDS = ['npm test', 'npm run check', 'npm run typecheck', 'npm run build'];
 const UNEXECUTED_LANGUAGE = /\bnot exercised\b|\bnot run\b|\bunexecuted\b|\bnever executed\b/i;
+const RESULT_VOCABULARY = /RUNTIME GAP|LIMITATION|OPEN FINDING/;
+const PASS_CLAIM = /\bcovered\b|\bcovers\b/i;
+const GAP_MARKER = /\b(?:no|not|never|nothing|none)\b/i;
 const KINDS = ['BUG', 'VALIDATION_GAP', 'MAINTENANCE', 'RESEARCH', 'OPPORTUNITY'];
 const TRIAGES = ['NEEDS_EVIDENCE', 'NEEDS_REVIEW', 'READY_FOR_IMPLEMENTATION', 'DEFERRED'];
 const SEVERITIES = /^(P[0-3]|NOT_ESTABLISHED)$/;
@@ -89,6 +92,22 @@ it('only reports PASS with evidence that exists in this repository', () => {
     expect.soft(evidence, `${id} PASS must not report unexecuted work as executed`).not.toMatch(
       UNEXECUTED_LANGUAGE
     );
+    expect.soft(evidence, `${id} PASS must not carry an unresolved result`).not.toMatch(
+      RESULT_VOCABULARY
+    );
+  }
+});
+
+it('never claims test coverage from a row that is not a PASS', () => {
+  const trackerRows = table(readDoc(trackerPath), /^\| [A-J]0[1-5] \|/);
+  expect(trackerRows.size).toBe(50);
+  for (const [id, row] of trackerRows) {
+    if (row[2] === 'PASS') continue;
+    const evidence = row[3] ?? '';
+    expect.soft(
+      PASS_CLAIM.test(evidence) && !GAP_MARKER.test(evidence),
+      `${id} is ${row[2]}, so it must not claim coverage without naming the remaining gap`
+    ).toBe(false);
   }
 });
 
@@ -122,9 +141,12 @@ it('indexes every committed audit report and labels superseded persona rows', ()
   );
   expect(withPersonaRows.length).toBeGreaterThan(0);
   for (const report of withPersonaRows) {
-    expect.soft(tracker, `${report} persona rows must be marked superseded`).toMatch(
-      /Persona rows in .* are superseded/
-    );
+    const lines = tracker.split(/\r?\n/).filter((line) => line.includes(report));
+    expect.soft(lines.length, `${report} must be indexed by its own line`).toBeGreaterThan(0);
+    expect.soft(
+      lines.some((line) => /superseded|supersedes/i.test(line)),
+      `${report} persona rows must be marked superseded on the same line`
+    ).toBe(true);
   }
 });
 
