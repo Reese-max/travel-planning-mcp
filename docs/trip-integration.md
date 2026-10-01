@@ -84,6 +84,9 @@ Canonical Trip v1（import_source 記錄來源；後續變更仍走 ChangePropos
 `imported_at`、`counts`、`unresolved_fields`、`warnings`、`conflicts`，讓 UI 可以直接顯示
 「匯入了什麼、還缺什麼」，而不是假裝資料完整。`unresolved_fields` 最多列 100 筆，
 超過的以 `UNRESOLVED_TRUNCATED` 標記，完整數量看 `counts.unresolved_total`。
+`conflicts` 只記錄匯入時必須做的結構判斷（多日合併成一天、來源已 archived、
+provider place 已存在而未覆寫）；真正不能安全處理的狀態（來源無日期、來源已變更、
+preview 身分不符）一律丟 error，不會降級成報告。
 
 匯入 v1 之後仍**沒有**寫回 TRIP，也沒有 durable 的跨系統對照表；client fingerprint 只能
 偵測讀取內容不同，不能取代上游交易版本檢查。

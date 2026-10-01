@@ -9,6 +9,7 @@ export interface TripFixtureOptions {
   undatedSecondDay?: boolean;
   allDaysUndated?: boolean;
   sameDateSecondDay?: boolean;
+  sameDateDays?: number;
   archived?: boolean;
   extraUndatedDays?: number;
 }
@@ -73,6 +74,15 @@ export function tripFixture(options: TripFixtureOptions = {}): Record<string, un
         items: [{ id: 31, day_id: 21, text: 'Undated idea', time: null, status: 'pending', place: null }],
         bookings: []
       },
+      ...Array.from({ length: options.sameDateDays ?? 0 }, (_, index) => ({
+        id: 400 + index,
+        label: `Same date ${index}`,
+        dt: '2026-10-20',
+        items: [
+          { id: 500 + index, day_id: 400 + index, text: `Same date idea ${index}`, time: null, status: 'pending', place: null }
+        ],
+        bookings: []
+      })),
       ...Array.from({ length: options.extraUndatedDays ?? 0 }, (_, index) => ({
         id: 1000 + index,
         label: `Bulk undated ${index}`,

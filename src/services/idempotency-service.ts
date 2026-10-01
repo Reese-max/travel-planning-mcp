@@ -78,9 +78,10 @@ export class IdempotencyService {
   }
 
   /**
-   * Returns the stored response for an already-executed request without running the
-   * action, or undefined when the key is still unexecuted. A key reused with a
-   * different payload still fails, so this cannot be used to bypass the fingerprint.
+   * Returns the response of an already-executed request without running the action, or
+   * undefined when nothing is stored for the key yet. Only persisted records qualify;
+   * a request still in flight is awaited by execute instead. Reusing a key with a
+   * different payload still fails, so this cannot bypass the fingerprint check.
    */
   replayIfStored<T>(
     scope: string,

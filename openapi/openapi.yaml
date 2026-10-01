@@ -300,8 +300,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ExternalTripImportReport' }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/ApprovalUnauthorized' }
+        '401': { $ref: '#/components/responses/ApprovalUnauthorized' }
+        '500': { description: The deployment's external source configuration is invalid }
         '409': { $ref: '#/components/responses/Conflict' }
         '502': { description: The external source could not be read }
         '503':

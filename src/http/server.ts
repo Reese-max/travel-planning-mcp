@@ -153,7 +153,13 @@ function errorStatus(error: unknown): number {
   if (error instanceof IdempotencyConflictError || error instanceof ProposalLifecycleConflictError) return 409;
   if (error instanceof ExternalImportConflictError) return 409;
   if (error instanceof ExternalImportApprovalError || error instanceof ExternalImportPreviewError) return 400;
-  if (error instanceof TripReadError) return 502;
+  if (error instanceof TripReadError) {
+    // CONFIG means this deployment is misconfigured and INPUT means the caller sent a
+    // bad id; neither is an upstream gateway failure.
+    if (error.code === 'CONFIG') return 500;
+    if (error.code === 'INPUT') return 400;
+    return 502;
+  }
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes('not found') || message.includes('not found:')) return 404;
   if (
@@ -349,10 +355,6 @@ export function createHttpServer(options: HttpServerOptions = {}) {
         const stored = idempotencyService.replayIfStored(scope, key, body);
         if (stored) {
           sendIdempotent(res, stored);
-          return;
-        }
-        if (!tripClient) {
-          sendJson(res, 503, { error: 'external_source_not_configured' });
           return;
         }
         // Re-read the source server-side so a caller cannot import an unreviewed payload.

@@ -134,9 +134,10 @@ never guesses: undated days are reported as `MISSING_DATE` and skipped, source d
 share a date are merged into one canonical day, items without a timezone keep their local
 wall clock in `source_timing` and get no `start_at`, and TRIP bookings never become
 `Reservation`s because they carry no start time. The response reports `unresolved_fields`
-(capped, with `counts.unresolved_total` for the full number), `warnings`, and `counts`;
-repeating the same snapshot returns `status: "duplicate"` instead of creating a second
-canonical trip, and a retry replays the stored response without re-reading the source.
+(capped, with `counts.unresolved_total` for the full number), `warnings`, `counts`, and
+`conflicts` for the structural judgement calls the import had to make; repeating the same
+snapshot returns `status: "duplicate"` instead of creating a second canonical trip, and a
+retry replays the stored response without re-reading the source.
 Any later change to the imported trip must go through `create_change_proposal → validate →
 approval → apply`.
 

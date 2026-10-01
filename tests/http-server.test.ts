@@ -456,6 +456,63 @@ describe('Travel Planning REST API', () => {
     }
   });
 
+  it('replays a stored duplicate response without re-reading the source', async () => {
+    const previous = transport;
+    const path = '/v1/external/trips/15/import';
+    const body = JSON.stringify({ actor_id: 'operator', traveler_display_name: 'Trip Owner' });
+    transport = async ({ id }) => jsonResponse(tripFixture({ id }));
+
+    try {
+      const first = await authorizedFetch(path, {
+        method: 'POST',
+        headers: { 'x-approval-key': APPROVAL_KEY, 'idempotency-key': 'import-seed-15' },
+        body
+      });
+      expect(first.status).toBe(201);
+
+      const duplicate = await authorizedFetch(path, {
+        method: 'POST',
+        headers: { 'x-approval-key': APPROVAL_KEY, 'idempotency-key': 'import-duplicate-15' },
+        body
+      });
+      expect(duplicate.status).toBe(200);
+      const duplicateBody = await duplicate.json();
+
+      transport = async () => new Response('upstream exploded', { status: 500 });
+      const replay = await authorizedFetch(path, {
+        method: 'POST',
+        headers: { 'x-approval-key': APPROVAL_KEY, 'idempotency-key': 'import-duplicate-15' },
+        body
+      });
+      expect(replay.status).toBe(200);
+      expect(replay.headers.get('idempotent-replayed')).toBe('true');
+      expect(await replay.json()).toEqual(duplicateBody);
+    } finally {
+      transport = previous;
+    }
+  });
+
+  it('reports a non-JSON upstream response without leaking its body', async () => {
+    const previous = transport;
+    transport = async () => new Response('<html>PRIVATE-UPSTREAM</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' }
+    });
+    try {
+      const response = await authorizedFetch('/v1/external/trips/16/import', {
+        method: 'POST',
+        headers: { 'x-approval-key': APPROVAL_KEY, 'idempotency-key': 'import-upstream-html' },
+        body: JSON.stringify({ actor_id: 'operator', traveler_display_name: 'Trip Owner' })
+      });
+      expect(response.status).toBe(502);
+      const body = (await response.json()) as { code?: string; error?: string };
+      expect(body.code).toBe('CONTENT_TYPE');
+      expect(JSON.stringify(body)).not.toContain('PRIVATE-UPSTREAM');
+    } finally {
+      transport = previous;
+    }
+  });
+
   it('refuses to import when no external source is configured on the deployment', async () => {
     await withServer(async (url) => {
       const response = await fetch(`${url}/v1/external/trips/12/import`, {
@@ -471,5 +528,31 @@ describe('Travel Planning REST API', () => {
       expect(response.status).toBe(503);
       expect(await response.json()).toMatchObject({ error: 'external_source_not_configured' });
     });
+  });
+
+  it('disables the import route entirely when the operator approval credential is off', async () => {
+    const extra = createHttpServer({ host: '127.0.0.1', port: 0, travelApiKey: READ_KEY });
+    await new Promise<void>((resolve, reject) => {
+      extra.server.once('error', reject);
+      extra.server.listen(0, '127.0.0.1', () => resolve());
+    });
+    const address = extra.server.address() as AddressInfo;
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/v1/external/trips/12/import`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${READ_KEY}`,
+          'idempotency-key': 'import-approval-disabled',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ actor_id: 'operator', traveler_display_name: 'Trip Owner' })
+      });
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ error: 'approval_api_disabled' });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        extra.server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   });
 });

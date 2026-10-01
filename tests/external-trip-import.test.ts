@@ -132,15 +132,17 @@ describe('canonical external trip import', () => {
 
   it('merges source days that share a date so the canonical trip stays validatable', async () => {
     const snapshot = await previewFromSource(
-      tripFixture({ undatedSecondDay: false, sameDateSecondDay: true })
+      tripFixture({ undatedSecondDay: false, sameDateSecondDay: true, sameDateDays: 2 })
     );
     const { db, service } = serviceWith();
 
     const report = service.importPreview(snapshot, APPROVAL);
     const trip = db.getTrip(report.trip.trip_id)!;
     expect(trip.days).toHaveLength(1);
-    expect(trip.days[0]!.items).toHaveLength(2);
+    expect(trip.days[0]!.items).toHaveLength(4);
     expect(new Set(trip.days.map((day) => day.date)).size).toBe(trip.days.length);
+    // Four source days on one date means three merged days, not four.
+    expect(report.conflicts).toContainEqual(expect.stringContaining('3 source day(s) shared one date'));
     expect(report.warnings.some((warning) => /merged into one canonical day/.test(warning))).toBe(true);
 
     const proposals = new ProposalService(db);
@@ -183,6 +185,7 @@ describe('canonical external trip import', () => {
     const report = service.importPreview(snapshot, APPROVAL);
     expect(report.trip.status).toBe('archived');
     expect(db.getTrip(report.trip.trip_id)!.status).toBe('archived');
+    expect(report.conflicts).toContainEqual(expect.stringContaining('imported as archived'));
   });
 
   it('rejects a forged booking identity mapping', async () => {
@@ -305,6 +308,24 @@ describe('canonical external trip import', () => {
       notes: 'Operator edited note',
       priority: 'must_visit'
     });
+  });
+
+  it('reports the preserved operator place as a conflict instead of hiding it', async () => {
+    const snapshot = await preview();
+    const { db, service } = serviceWith();
+    db.savePlace({
+      place_id: snapshot.places[0]!.place_id,
+      name: snapshot.places[0]!.name,
+      categories: ['museum'],
+      location: { lat: 25, lng: 121 },
+      source: { provider: 'trip', source_id: '8' },
+      user_metadata: { notes: 'Operator edited note' }
+    });
+
+    const report = service.importPreview(snapshot, APPROVAL);
+    expect(report.conflicts).toContainEqual(
+      expect.stringContaining('already existed in canonical storage and were not overwritten')
+    );
   });
 
   it('records the import provenance in the immutable first trip version', async () => {

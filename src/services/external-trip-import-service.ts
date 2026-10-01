@@ -340,8 +340,10 @@ export class ExternalTripImportService {
     // Places are written before the trip on purpose: an orphaned provider place is a
     // harmless leftover that a retry repairs, while a trip referencing missing places
     // would not be. A durable TravelStore must still wrap these writes transactionally.
+    let preservedPlaces = 0;
     for (const place of snapshot.places) {
-      if (!this.db.getPlace(place.place_id)) this.db.savePlace(canonicalPlace(place));
+      if (this.db.getPlace(place.place_id)) preservedPlaces += 1;
+      else this.db.savePlace(canonicalPlace(place));
     }
 
     const dates = [...new Set(datedDays.map((day) => day.date))].sort();
@@ -372,6 +374,8 @@ export class ExternalTripImportService {
         { traveler_id: randomUUID(), display_name: travelerDisplayName, role: 'owner' }
       ],
       ...(snapshot.currency ? { preferences: { currency: snapshot.currency } } : {}),
+      // The whole source place catalogue is linked, not only referenced places, so an
+      // operator can build on provider places before items point at them.
       place_ids: snapshot.places.map((place) => place.place_id),
       reservation_ids: [],
       constraint_ids: [],
@@ -401,6 +405,21 @@ export class ExternalTripImportService {
       0
     );
     const mergedDays = unresolved.merged_days;
+    // Structural judgement calls are reported as conflicts; hard problems throw instead.
+    const conflicts: string[] = [];
+    if (mergedDays > 0) {
+      conflicts.push(
+        `${mergedDays} source day(s) shared one date; their items were merged into a single canonical day.`
+      );
+    }
+    if (preservedPlaces > 0) {
+      conflicts.push(
+        `${preservedPlaces} provider place(s) already existed in canonical storage and were not overwritten.`
+      );
+    }
+    if (snapshot.archived) {
+      conflicts.push('Source trip is archived; the canonical trip was imported as archived.');
+    }
     this.db.appendAudit({
       event_id: randomUUID(),
       event_type: 'external_trip_imported',
@@ -458,7 +477,7 @@ export class ExternalTripImportService {
       },
       unresolved_fields: unresolved.fields,
       warnings: [...IMPORT_WARNINGS, ...mergedDayWarnings],
-      conflicts: []
+      conflicts
     };
   }
 
