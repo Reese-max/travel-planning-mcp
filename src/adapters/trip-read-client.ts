@@ -75,9 +75,11 @@ export interface TripImportPreview {
   fingerprint_is_atomic_version: boolean;
   persisted: boolean;
   writeback_supported: boolean;
+  mode: 'read_preview_only';
   canonical_preview: {
     trip_id: string;
     title: string;
+    archived: boolean | null;
     currency: string | null;
     places: Place[];
     days: Array<{
@@ -279,7 +281,7 @@ export class TripReadClient {
       provider: 'trip', instance_id: this.instanceId, live: true, retrieved_at: retrievedAt,
       source_fingerprint: createHash('sha256').update(stable(raw)).digest('hex'),
       fingerprint_is_atomic_version: false, persisted: false, writeback_supported: false,
-      mode: 'read_preview_only', external_trip_id: trip.id,
+      mode: 'read_preview_only' as const, external_trip_id: trip.id,
       mapped_trip_id: tripExternalId(this.instanceId, 'trip', trip.id), title: trip.name,
       archived: trip.archived, currency: trip.currency, places: [...placeMap.values()], days, issues,
       warnings: [
@@ -308,9 +310,11 @@ export class TripReadClient {
       fingerprint_is_atomic_version: preview.fingerprint_is_atomic_version,
       persisted: preview.persisted,
       writeback_supported: preview.writeback_supported,
+      mode: preview.mode,
       canonical_preview: {
         trip_id: preview.mapped_trip_id,
         title: preview.title,
+        archived: preview.archived,
         currency: preview.currency,
         places: preview.places,
         days: preview.days

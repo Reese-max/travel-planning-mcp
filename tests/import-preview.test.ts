@@ -70,10 +70,12 @@ it('returns an explicit, non-persisting import preview contract', async () => {
     live: true,
     persisted: false,
     writeback_supported: false,
+    mode: 'read_preview_only',
     fingerprint_is_atomic_version: false,
     canonical_preview: {
       trip_id: expect.any(String),
-      title: 'Synthetic trip'
+      title: 'Synthetic trip',
+      archived: false
     },
     unresolved_fields: expect.arrayContaining([
       expect.objectContaining({ code: 'MISSING_DATE' }),
