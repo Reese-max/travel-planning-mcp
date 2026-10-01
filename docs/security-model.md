@@ -113,7 +113,20 @@ Applying or rolling back creates a new trip version. Historical versions are not
 
 ### 13. Audit trail
 
-The current store records proposal creation, validation, approval, rejection, application, and rollback events. Audit data is still in-memory in the MVP and must move to durable storage before production.
+The current store records proposal creation, validation, approval, rejection, application, rollback, and externally approved import events. Audit data is still in-memory in the MVP and must move to durable storage before production.
+
+### 14. External import is operator-only
+
+Canonical import of an external trip snapshot is exposed on the REST surface only
+(`POST /v1/external/trips/{externalTripId}/import`) and requires the separate approval
+credential plus an `Idempotency-Key`. There is deliberately no MCP import tool, so an AI
+client cannot turn a preview into stored canonical data.
+
+The server re-reads the source snapshot itself instead of trusting a payload supplied by
+the caller, and it re-derives every instance-scoped ID mapping before writing. An optional
+`source_fingerprint` pins the snapshot the operator actually reviewed and fails with `409`
+when the upstream snapshot has changed. Re-importing the same snapshot reports a
+duplicate instead of creating a second canonical trip.
 
 ## Current credential rules
 
