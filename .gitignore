@@ -1,6 +1,8 @@
 node_modules/
 dist/
 coverage/
+.issue-loop-*.json
+package-lock.json
 .env
 .env.*
 !.env.example
