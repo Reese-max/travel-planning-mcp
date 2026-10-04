@@ -34,4 +34,9 @@ export function registerTripReadTools(server: McpServer, client: TripReadClient)
     annotations,
     inputSchema: { external_trip_id: z.number().int().positive().safe() }
   }, async ({ external_trip_id }) => result(() => client.previewTrip(external_trip_id)));
+  server.registerTool('preview_external_trip_import', {
+    description: 'Preview normalization from TRIP into the canonical model without persisting, importing, or authorizing a change. Missing dates, timezones, and booking times remain unresolved.',
+    annotations,
+    inputSchema: { external_trip_id: z.number().int().positive().safe() }
+  }, async ({ external_trip_id }) => result(() => client.previewImport(external_trip_id)));
 }
