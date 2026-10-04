@@ -83,12 +83,14 @@ TravelStore
   -> PostgreSQL / SQLite later
 
 PlaceProvider
-  -> DemoPlaceProvider today
-  -> Google Places / OSM / tourism data later
+  -> DemoPlaceProvider by default
+  -> GooglePlaceProvider when PLACE_PROVIDER=google
+  -> OSM / tourism data later
 
 RouteProvider
-  -> DemoRouteProvider today
-  -> Google Routes / TDX / routing engine later
+  -> DemoRouteProvider by default
+  -> GoogleRouteProvider when ROUTE_PROVIDER=google
+  -> TDX / routing engine later
 ```
 
 Provider descriptors include a `live` flag. AI clients can call `get_provider_status` or `GET /v1/providers` before treating route/place data as live facts.
@@ -123,6 +125,12 @@ Provider descriptors include a `live` flag. AI clients can call `get_provider_st
 - `rollback_trip` — disabled unless `ENABLE_ADMIN_MCP_WRITES=true`
 
 There is deliberately no MCP `approve_change_proposal` tool.
+
+## Fixed A01–J05 quality audit
+
+The fixed 50-persona audit is tracked in [`docs/quality-audit/tracker.md`](./docs/quality-audit/tracker.md). Its rules live in [`docs/quality-audit/README.md`](./docs/quality-audit/README.md) and the frozen persona needs in [`docs/quality-audit/persona-baseline.md`](./docs/quality-audit/persona-baseline.md). `tests/quality-audit.test.ts` keeps the baseline, the tracker and the findings register consistent, so a persona need cannot be silently substituted or a `PASS` claimed without evidence that exists in this repository.
+
+The tracker records evidence and open findings only. It does not authorize implementation, merge, deploy, paid provider calls or external writes.
 
 ## REST API
 
@@ -251,9 +259,9 @@ The response includes `Idempotent-Replayed: true` when an earlier successful res
 This is still an MVP foundation:
 
 - persistence and idempotency records are in-memory;
-- place search uses demo data;
-- route calculation is an explicitly labeled estimate, not live routing;
+- demo place and route providers are the default; live Google adapters are opt-in through `PLACE_PROVIDER=google` and `ROUTE_PROVIDER=google`, and their responses stay labeled as provider data with retrieval metadata;
 - no real weather/transit/flight/calendar provider is connected yet;
+- live Google adapters have no request timeout, quota or retry budget yet;
 - REST auth is bootstrap API-key auth, not user OAuth/ACL;
 - remote Streamable HTTP MCP transport is not yet enabled.
 
@@ -263,7 +271,7 @@ These limitations are deliberate so the canonical model and safety boundary stay
 
 See [`docs/roadmap.md`](./docs/roadmap.md).
 
-The next major steps are a durable `TravelStore`, real Places + Routes adapters, weather/transit/flight context, and remote MCP transport.
+The next major steps are a durable `TravelStore`, hardened live providers (timeout, retry and quota budget), weather/transit/flight context, and remote MCP transport.
 
 ## License
 
