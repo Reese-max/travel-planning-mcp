@@ -122,6 +122,33 @@ function pushConstraintResult(
   else result.soft_constraint_warnings.push(rendered);
 }
 
+function hasEvaluableParameters(constraint: Constraint): boolean {
+  const parameters = constraint.parameters;
+  const nonblank = (value: unknown): boolean => typeof value === 'string' && value.trim().length > 0;
+  const time = (value: unknown): value is string => typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+  const nonnegative = (value: unknown): boolean => asNumber(value) !== undefined && (value as number) >= 0;
+  switch (constraint.type) {
+    case 'fixed_item': return !!constraint.scope.item_ids?.length && constraint.scope.item_ids.every(nonblank);
+    case 'must_visit':
+    case 'avoid_place': return nonblank(parameters.place_id);
+    case 'avoid_category': return nonblank(parameters.category);
+    case 'return_by':
+    case 'start_after': return time(parameters.time);
+    case 'time_window': return time(parameters.start) && time(parameters.end) && parameters.start <= parameters.end;
+    case 'max_places_per_day': {
+      const count = parameters.max ?? parameters.count;
+      return nonnegative(count) && Number.isInteger(count);
+    }
+    case 'max_walking_distance': return nonnegative(parameters.kilometers_per_day ?? parameters.kilometers);
+    case 'max_daily_budget': return nonnegative(parameters.amount) && typeof parameters.currency === 'string' && /^[A-Z]{3}$/.test(parameters.currency);
+    case 'transport_mode': {
+      const modes = asStringArray(parameters.allowed);
+      return !!modes?.length && modes.every((mode) => ['walking', 'transit', 'rail', 'taxi', 'car', 'bike'].includes(mode));
+    }
+    default: return false;
+  }
+}
+
 export class ProposalService {
   constructor(private readonly db: TravelStore = store) {}
 
@@ -555,6 +582,11 @@ export class ProposalService {
         continue;
       }
 
+      if (!hasEvaluableParameters(constraint)) {
+        pushConstraintResult(constraint, 'cannot be evaluated safely: missing or invalid parameters.', result);
+        continue;
+      }
+
       if (constraint.type === 'fixed_item') continue;
 
       if (constraint.type === 'must_visit') {
@@ -710,9 +742,7 @@ export class ProposalService {
           }
 
           if (incompatibleCurrency) {
-            result.soft_constraint_warnings.push(
-              `${constraint.type} (${constraint.constraint_id}): mixed currencies prevent a complete budget check.`
-            );
+            pushConstraintResult(constraint, 'mixed currencies prevent a complete budget check.', result);
           }
           if (total > max) {
             pushConstraintResult(
