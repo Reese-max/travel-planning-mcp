@@ -267,7 +267,10 @@ paths:
         server-side from the operator-configured TRIP instance, so a caller cannot
         import an unreviewed payload. The operator must include the exact required
         source_fingerprint from the read-only preview; a missing fingerprint is
-        rejected with 400 and a changed upstream snapshot returns 409. Unresolved
+        rejected with 400 and a changed source instance or snapshot returns 409.
+        Both fingerprints and import retry scopes bind provider, configured stable
+        instance ID and source trip ID, excluding API credentials and URL aliases.
+        Unresolved
         dates, timezones and booking times are reported instead of being invented,
         and repeated imports of the same snapshot are reported as duplicates.
       parameters:

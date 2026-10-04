@@ -126,6 +126,12 @@ The server re-reads the source snapshot itself instead of trusting a payload sup
 the caller, and it re-derives every instance-scoped ID mapping before writing. The request
 requires the `source_fingerprint` from the snapshot the operator actually reviewed;
 missing fingerprints fail with `400`, and a changed upstream source fails with `409`.
+Both the reviewed fingerprint and the import retry scope bind the provider, configured
+stable instance ID and source trip ID. Identical contents from another instance cannot
+reuse that review or replay its completed import response. API credentials and endpoint
+aliases are excluded, so rotating them within the same instance preserves retries.
+A missing or invalid configured instance ID fails before receipt lookup or source reads;
+previews issued with the earlier content-only fingerprint must be fetched and reviewed again.
 Re-importing the same snapshot reports a
 duplicate instead of creating a second canonical trip.
 

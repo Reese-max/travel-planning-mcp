@@ -55,7 +55,7 @@ Canonical Trip v1（import_source 記錄來源；後續變更仍走 ChangePropos
 | `booked`、`constraint` 行程狀態 | 在預覽保留 locked，避免後續誤當成可自由移動 |
 | `TripBooking` 有 label/type/reference，沒有起訖時間 | 留在 `unresolved_bookings`；不生成不符合核心契約的 Reservation，也不把未提供的確認狀態標成 confirmed |
 | 原始備註、訂位代碼、附件與同行者身分 | 不送到 AI 預覽；只保留規劃所需名稱、時段與地點 |
-| 原始快照的 SHA-256 fingerprint | 僅可偵測讀取內容不同，**不是服務端交易版本／ETag**，不能宣稱解決競爭寫入 |
+| SHA-256 fingerprint | 綁定 provider、operator 設定的穩定 instance ID、source trip ID 與原始快照；不含 API URL／token。**不是服務端交易版本／ETag**，不能宣稱解決競爭寫入 |
 | 上游回應缺欄位、錯誤或不一致 | 拒絕並回傳錯誤，不把失敗假裝成空旅程 |
 
 `preview_external_trip_import` 只把上述已正規化且可安全提供規劃的欄位放入
@@ -75,7 +75,8 @@ Canonical Trip v1（import_source 記錄來源；後續變更仍走 ChangePropos
 | 需要 `X-Approval-Key` 與 `Idempotency-Key` | 與 approve/apply/rollback 同一條 operator 憑證分界 |
 | 沒有 MCP 匯入工具 | AI client 不能把 preview 變成 canonical 資料 |
 | 伺服器端重新讀取來源 | 不接受呼叫端自帶 payload，避免匯入未經 review 的內容 |
-| 必填 `source_fingerprint` | 使用 read-only preview 回傳且操作員已 review 的指紋；省略回 `400`，上游改變回 `409 preview_stale` |
+| 必填 `source_fingerprint` | 使用 read-only preview 回傳且操作員已 review 的指紋；省略回 `400`，來源 instance 或快照改變回 `409 preview_stale`。舊的未綁定來源指紋必須重新取得預覽 |
+| 匯入重試的 scope | provider + instance ID + source trip ID；不同實例不共用匯入回應。同一實例更換 token／URL alias 仍可回放完成的請求；缺少合法 instance ID 時先拒絕，不查舊 receipt |
 | 重複匯入 | 同一份 fingerprint 再匯入回 `status: "duplicate"`，不產生第二個 canonical Trip |
 | 來源快照改變 | 回 conflict，不靜默覆蓋既有 canonical Trip |
 | `TripDay.dt` 為 null | 該日不匯入並回報 `MISSING_DATE`；完全沒有日期時整筆拒絕 |

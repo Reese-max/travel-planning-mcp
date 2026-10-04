@@ -3,7 +3,7 @@ import { createServer as createNodeServer, type IncomingMessage, type ServerResp
 import { z } from 'zod';
 import { placeProvider } from '../adapters/demo-place-provider.js';
 import { tripClientFromEnv } from '../adapters/trip-client-env.js';
-import { TripReadClient, TripReadError } from '../adapters/trip-read-client.js';
+import { TripReadClient, TripReadError, tripSourceIdentity } from '../adapters/trip-read-client.js';
 import type { ChangeOperation, TransportMode } from '../domain/types.js';
 import {
   ExternalImportApprovalError,
@@ -349,7 +349,9 @@ export function createHttpServer(options: HttpServerOptions = {}) {
           return;
         }
         const body = externalTripImportSchema.parse(await readJson(req));
-        const scope = `import-external-trip:${externalTripId}`;
+        // Validate the configured source before looking up a prior receipt.
+        const sourceIdentity = tripSourceIdentity(tripClient.instanceId, externalTripId);
+        const scope = `import-external-trip:${sourceIdentity.provider}:${sourceIdentity.instance_id}:${sourceIdentity.source_trip_id}`;
         // A stored result wins before any upstream read, so a retry replays the
         // original response instead of depending on current source state.
         const stored = idempotencyService.replayIfStored(scope, key, body);
@@ -362,7 +364,7 @@ export function createHttpServer(options: HttpServerOptions = {}) {
         if (body.source_fingerprint !== preview.source_fingerprint) {
           sendJson(res, 409, {
             error: 'preview_stale',
-            message: 'Source snapshot changed since the reviewed preview fingerprint.'
+            message: 'Source identity or snapshot changed since the reviewed preview fingerprint.'
           });
           return;
         }
