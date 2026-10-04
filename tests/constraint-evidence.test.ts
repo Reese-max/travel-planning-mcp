@@ -26,7 +26,9 @@ class EvidenceStore extends MemoryStore {
 }
 
 function fixture(type: Constraint['type'], parameters: Record<string, unknown>, strength: Constraint['strength'] = 'hard') {
-  const db = new EvidenceStore({ constraint_id: 'evidence-check', type, parameters, strength,
+  const scopedParameters = ['return_by', 'start_after', 'time_window'].includes(type)
+    ? { timezone: 'Asia/Tokyo', ...parameters } : parameters;
+  const db = new EvidenceStore({ constraint_id: 'evidence-check', type, parameters: scopedParameters, strength,
     enabled: true, scope: { trip: true }, created_by: 'user' });
   const trip = db.getTrip(demoTripId)!;
   const item = trip.days[0]!.items.find((candidate) => candidate.item_id === ITEM_ID)!;

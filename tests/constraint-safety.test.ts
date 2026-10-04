@@ -16,7 +16,9 @@ class ConstraintStore extends MemoryStore {
 }
 
 function fixture(type: Constraint['type'], parameters: Record<string, unknown>, strength: Constraint['strength'] = 'hard') {
-  const db = new ConstraintStore({ constraint_id: 'safety-check', type, parameters, strength,
+  const scopedParameters = ['return_by', 'start_after', 'time_window'].includes(type)
+    ? { timezone: 'Asia/Tokyo', ...parameters } : parameters;
+  const db = new ConstraintStore({ constraint_id: 'safety-check', type, parameters: scopedParameters, strength,
     enabled: true, scope: { trip: true }, created_by: 'user' });
   const service = new ProposalService(db);
   const proposal = service.create({ tripId: demoTripId, operations: [{ operation: 'move',
@@ -94,7 +96,7 @@ describe('constraint safety', () => {
     service.validate(proposal.proposal_id);
     db.constraint.parameters = {};
     expect(() => service.approve({ proposalId: proposal.proposal_id, actorId: 'operator', channel: 'ui' })).toThrow(/no longer valid/);
-    db.constraint.parameters = { time: '23:00' };
+    db.constraint.parameters = { time: '23:00', timezone: 'Asia/Tokyo' };
     service.approve({ proposalId: proposal.proposal_id, actorId: 'operator', channel: 'ui' });
     db.constraint.parameters = {};
     expect(() => service.apply(proposal.proposal_id)).toThrow();

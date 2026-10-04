@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { z } from 'zod';
 import type {
   ApprovalReceipt,
   AuditEvent,
@@ -13,6 +12,7 @@ import type {
 } from '../domain/types.js';
 import type { TravelStore } from '../ports/travel-store.js';
 import { store } from '../store/memory-store.js';
+import { createConstraintClock, isAfterBoundary, readAbsoluteTime } from './constraint-clock.js';
 
 export interface CreateProposalInput {
   tripId: string;
@@ -64,25 +64,16 @@ function asStringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : undefined;
 }
 
-const absoluteDateTimeSchema = z.iso.datetime({ offset: true });
 const transportModes = ['walking', 'transit', 'rail', 'taxi', 'car', 'bike'];
-
-function localDateTimeEvidence(value: unknown): string | undefined {
-  const parsed = absoluteDateTimeSchema.safeParse(value);
-  // A source wall clock without an offset/timezone must remain unresolved.
-  if (!parsed.success) return undefined;
-  let local = parsed.data.replace(/(?:Z|[+-]\d{2}:\d{2})$/, '');
-  if (local.length === 16) local += ':00';
-  return local.replace(/\.0+$/, '').replace(/(\.\d*?[1-9])0+$/, '$1');
-}
 
 function isMetadataOnlyNote(item: TripItem): boolean {
   return item.type === 'note' && !item.place_id && !item.reservation_id && !item.route &&
-    item.start_at == null && item.end_at == null && !('source_timing' in item);
+    item.start_at == null && item.end_at == null && !('source_timing' in item) &&
+    (!('duration_minutes' in item) || asNumber(item.duration_minutes) === 0);
 }
 
 function requiresRouteEvidence(item: TripItem): boolean {
-  return (item.type !== 'note' && item.type !== 'free_time') ||
+  return (item.type === 'note' ? !isMetadataOnlyNote(item) : item.type !== 'free_time') ||
     !!item.place_id || !!item.reservation_id || 'source_timing' in item;
 }
 
@@ -652,20 +643,49 @@ export class ProposalService {
           ? day.items.filter((item) => constraint.scope.item_ids!.includes(item.item_id))
           : day.items;
 
+        let lowerBoundary: number | undefined;
+        let upperBoundary: number | undefined;
+        if (['return_by', 'start_after', 'time_window'].includes(constraint.type)) {
+          if (scopedItems.every(isMetadataOnlyNote)) continue;
+          // A policy's explicit timezone takes precedence even when invalid.
+          // Otherwise only the designated day base place establishes its clock.
+          const timezone = Object.hasOwn(constraint.parameters, 'timezone')
+            ? constraint.parameters.timezone
+            : day.base_place_id ? this.db.getPlace(day.base_place_id)?.location.timezone : undefined;
+          const clock = createConstraintClock(timezone);
+          if (!clock) {
+            pushConstraintResult(constraint, `cannot be evaluated safely: ${day.date} has no valid authoritative constraint or day-base timezone.`, result);
+            continue;
+          }
+          if (constraint.type !== 'return_by') {
+            lowerBoundary = clock.boundary(day.date, String(constraint.type === 'time_window'
+              ? constraint.parameters.start : constraint.parameters.time));
+          }
+          if (constraint.type !== 'start_after') {
+            upperBoundary = clock.boundary(day.date, String(constraint.type === 'time_window'
+              ? constraint.parameters.end : constraint.parameters.time));
+          }
+          if ((constraint.type !== 'return_by' && lowerBoundary === undefined) ||
+            (constraint.type !== 'start_after' && upperBoundary === undefined)) {
+            pushConstraintResult(constraint, `cannot be evaluated safely: ${day.date} has an invalid, nonexistent or ambiguous local constraint boundary.`, result);
+            continue;
+          }
+        }
+
         if (constraint.type === 'return_by') {
           const limit = asString(constraint.parameters.time);
           if (!limit) continue;
           for (const item of scopedItems) {
             if (isMetadataOnlyNote(item)) continue;
-            const end = localDateTimeEvidence(item.end_at);
+            const end = readAbsoluteTime(item.end_at);
             if (!end) {
               pushConstraintResult(constraint, `cannot be evaluated safely: item ${item.item_id} has no valid end time with a UTC offset.`, result);
               continue;
             }
-            if (end > `${day.date}T${limit}:00`) {
+            if (isAfterBoundary(end, upperBoundary!)) {
               pushConstraintResult(
                 constraint,
-                `item ${item.item_id} ends at ${end}, after ${day.date}T${limit}.`,
+                `item ${item.item_id} ends after the authoritative ${day.date}T${limit} deadline.`,
                 result
               );
             }
@@ -677,15 +697,15 @@ export class ProposalService {
           if (!limit) continue;
           for (const item of scopedItems) {
             if (isMetadataOnlyNote(item)) continue;
-            const start = localDateTimeEvidence(item.start_at);
+            const start = readAbsoluteTime(item.start_at);
             if (!start) {
               pushConstraintResult(constraint, `cannot be evaluated safely: item ${item.item_id} has no valid start time with a UTC offset.`, result);
               continue;
             }
-            if (start < `${day.date}T${limit}:00`) {
+            if (start.epochMilliseconds < lowerBoundary!) {
               pushConstraintResult(
                 constraint,
-                `item ${item.item_id} starts at ${start}, before ${day.date}T${limit}.`,
+                `item ${item.item_id} starts before the authoritative ${day.date}T${limit} limit.`,
                 result
               );
             }
@@ -698,13 +718,13 @@ export class ProposalService {
           if (!start || !end) continue;
           for (const item of scopedItems) {
             if (isMetadataOnlyNote(item)) continue;
-            const itemStart = localDateTimeEvidence(item.start_at);
-            const itemEnd = localDateTimeEvidence(item.end_at);
+            const itemStart = readAbsoluteTime(item.start_at);
+            const itemEnd = readAbsoluteTime(item.end_at);
             if (!itemStart || !itemEnd) {
               pushConstraintResult(constraint, `cannot be evaluated safely: item ${item.item_id} needs valid start and end times with UTC offsets.`, result);
               continue;
             }
-            if (itemStart < `${day.date}T${start}:00` || itemEnd > `${day.date}T${end}:00`) {
+            if (itemStart.epochMilliseconds < lowerBoundary! || isAfterBoundary(itemEnd, upperBoundary!)) {
               pushConstraintResult(
                 constraint,
                 `item ${item.item_id} falls outside allowed window ${start}-${end}.`,
