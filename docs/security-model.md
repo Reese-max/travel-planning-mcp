@@ -123,9 +123,10 @@ credential plus an `Idempotency-Key`. There is deliberately no MCP import tool, 
 client cannot turn a preview into stored canonical data.
 
 The server re-reads the source snapshot itself instead of trusting a payload supplied by
-the caller, and it re-derives every instance-scoped ID mapping before writing. An optional
-`source_fingerprint` pins the snapshot the operator actually reviewed and fails with `409`
-when the upstream snapshot has changed. Re-importing the same snapshot reports a
+the caller, and it re-derives every instance-scoped ID mapping before writing. The request
+requires the `source_fingerprint` from the snapshot the operator actually reviewed;
+missing fingerprints fail with `400`, and a changed upstream source fails with `409`.
+Re-importing the same snapshot reports a
 duplicate instead of creating a second canonical trip.
 
 ## Current credential rules

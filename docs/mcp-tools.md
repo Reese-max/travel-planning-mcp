@@ -19,6 +19,13 @@ Reads one reservation and its protection state.
 ### `get_constraints`
 Reads all constraints attached to a trip.
 
+### `preview_external_trip_import`
+Reads a redacted TRIP snapshot and returns a structured import preview with
+`source`, `source_trip_id`, `canonical_preview`, `unresolved_fields`,
+`warnings`, and `conflicts`. It never persists a Trip, creates a Reservation,
+or authorizes an import. Missing dates, timezones, and booking times remain
+unresolved.
+
 ### `get_change_proposal`
 Reads one proposal and its validation result.
 

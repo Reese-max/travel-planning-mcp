@@ -265,8 +265,9 @@ paths:
       description: >-
         Requires X-Approval-Key and Idempotency-Key. The source snapshot is re-read
         server-side from the operator-configured TRIP instance, so a caller cannot
-        import an unreviewed payload. Optional source_fingerprint pins the reviewed
-        preview and returns 409 when the upstream snapshot changed. Unresolved
+        import an unreviewed payload. The operator must include the exact required
+        source_fingerprint from the read-only preview; a missing fingerprint is
+        rejected with 400 and a changed upstream snapshot returns 409. Unresolved
         dates, timezones and booking times are reported instead of being invented,
         and repeated imports of the same snapshot are reported as duplicates.
       parameters:
@@ -282,7 +283,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [actor_id, traveler_display_name]
+              required: [actor_id, traveler_display_name, source_fingerprint]
               properties:
                 actor_id: { type: string, minLength: 1 }
                 traveler_display_name: { type: string, minLength: 1, maxLength: 200 }

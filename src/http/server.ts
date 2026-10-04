@@ -61,7 +61,7 @@ const rollbackSchema = z.object({
 const externalTripImportSchema = z.object({
   actor_id: z.string().min(1),
   traveler_display_name: z.string().min(1).max(200),
-  source_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  source_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
   note: z.string().max(2000).optional()
 });
 
@@ -359,7 +359,7 @@ export function createHttpServer(options: HttpServerOptions = {}) {
         }
         // Re-read the source server-side so a caller cannot import an unreviewed payload.
         const preview = await tripClient.previewTrip(externalTripId);
-        if (body.source_fingerprint && body.source_fingerprint !== preview.source_fingerprint) {
+        if (body.source_fingerprint !== preview.source_fingerprint) {
           sendJson(res, 409, {
             error: 'preview_stale',
             message: 'Source snapshot changed since the reviewed preview fingerprint.'

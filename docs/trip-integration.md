@@ -37,7 +37,8 @@ Canonical Trip v1（import_source 記錄來源；後續變更仍走 ChangePropos
 
 - `TripReadClient.listTrips(offset, limit)`：列出外部旅程，回傳來源、讀取時間與分頁資訊。
 - `TripReadClient.previewTrip(id)`：取得資料映射預覽、來源 fingerprint、缺漏與不能同步的欄位。
-- `list_external_trip_trips`、`get_external_trip_preview`：兩個可選的唯讀 MCP 工具。
+- `list_external_trip_trips`、`get_external_trip_preview`：唯讀研究工具。
+- `preview_external_trip_import`：回傳明確的 `source`、`source_trip_id`、`canonical_preview`、`unresolved_fields`、`warnings`、`conflicts` 匯入預覽；不持久化、不產生 Reservation、不授權匯入。
 - `src/trip-index.ts`：保留原有核心工具，僅在操作員設定完整時加掛 TRIP 工具。
 - `scripts/bootstrap-travel-workspace.mjs`：固定版本 clone、來源檢查、保留上游 remote、加入 App overlay。拒絕覆蓋既有資料夾。
 - `scripts/package-travel-workspace.py`：建立 App／Wanderlog 參考原始碼 ZIP 與 SHA-256 provenance。
@@ -57,6 +58,11 @@ Canonical Trip v1（import_source 記錄來源；後續變更仍走 ChangePropos
 | 原始快照的 SHA-256 fingerprint | 僅可偵測讀取內容不同，**不是服務端交易版本／ETag**，不能宣稱解決競爭寫入 |
 | 上游回應缺欄位、錯誤或不一致 | 拒絕並回傳錯誤，不把失敗假裝成空旅程 |
 
+`preview_external_trip_import` 只把上述已正規化且可安全提供規劃的欄位放入
+`canonical_preview`。`unresolved_fields` 保留需要人工或正式匯入流程補齊的問題；
+`conflicts` 目前在一致的快照上為空，矛盾的來源資料會直接拒絕，避免產生看似
+可匯入但實際不可信的預覽。
+
 本階段刻意不產生完整 `Trip`／`Reservation` 假資料。要完成正式匯入，還需日期、時區、跨日邏輯、訂位起訖與歸屬授權等資料。
 
 ## 第二階段：受控匯入（canonical trip v1）
@@ -69,7 +75,7 @@ Canonical Trip v1（import_source 記錄來源；後續變更仍走 ChangePropos
 | 需要 `X-Approval-Key` 與 `Idempotency-Key` | 與 approve/apply/rollback 同一條 operator 憑證分界 |
 | 沒有 MCP 匯入工具 | AI client 不能把 preview 變成 canonical 資料 |
 | 伺服器端重新讀取來源 | 不接受呼叫端自帶 payload，避免匯入未經 review 的內容 |
-| 選擇性 `source_fingerprint` | 綁定操作員實際 review 過的快照；上游改了就回 `409 preview_stale` |
+| 必填 `source_fingerprint` | 使用 read-only preview 回傳且操作員已 review 的指紋；省略回 `400`，上游改變回 `409 preview_stale` |
 | 重複匯入 | 同一份 fingerprint 再匯入回 `status: "duplicate"`，不產生第二個 canonical Trip |
 | 來源快照改變 | 回 conflict，不靜默覆蓋既有 canonical Trip |
 | `TripDay.dt` 為 null | 該日不匯入並回報 `MISSING_DATE`；完全沒有日期時整筆拒絕 |
