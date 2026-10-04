@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { demoTripId } from '../src/data/seed.js';
-import type { Constraint } from '../src/domain/types.js';
+import type { Constraint, Money, Reservation } from '../src/domain/types.js';
 import { ProposalService } from '../src/services/proposal-service.js';
 import { MemoryStore } from '../src/store/memory-store.js';
 
 class ConstraintStore extends MemoryStore {
+  reservationPrices = new Map<string, Money>();
   constructor(public constraint: Constraint) { super(); }
   override getConstraintsForTrip(): Constraint[] { return [this.constraint]; }
+  override getReservation(id: string): Reservation | undefined {
+    const reservation = super.getReservation(id);
+    const price = this.reservationPrices.get(id);
+    return reservation && price ? { ...reservation, price } : reservation;
+  }
 }
 
 function fixture(type: Constraint['type'], parameters: Record<string, unknown>, strength: Constraint['strength'] = 'hard') {
@@ -57,7 +63,18 @@ describe('constraint safety', () => {
       ['max_walking_distance', { kilometers: 0 }],
       ['max_daily_budget', { amount: 0, currency: 'JPY' }]
     ] as Array<[Constraint['type'], Record<string, unknown>]>) {
-      const { service, proposal } = fixture(type, parameters);
+      const { db, service, proposal } = fixture(type, parameters);
+      // Explicit known zeros are evaluable; missing route/price data is not zero.
+      const trip = db.getTrip(demoTripId)!;
+      for (const day of trip.days) for (const item of day.items) {
+        item.route = { mode: 'walking', distance_meters: 0, duration_minutes: 0, source: 'synthetic-test' };
+        if (item.place_id) {
+          const place = db.getPlace(item.place_id)!;
+          db.savePlace({ ...place, planning: { ...place.planning, estimated_cost: { amount: 0, currency: 'JPY' } } });
+        }
+        if (item.reservation_id) db.reservationPrices.set(item.reservation_id, { amount: 0, currency: 'JPY' });
+      }
+      db.saveTrip(trip);
       expect(service.validate(proposal.proposal_id).validation?.valid).toBe(true);
     }
   });

@@ -57,6 +57,20 @@ Hard violations block validation/apply. Soft violations are retained as warnings
 
 If a hard constraint type cannot yet be evaluated safely, validation fails conservatively instead of pretending the constraint passed.
 
+Supported constraints also require usable parameters and itinerary evidence. Temporal checks need
+valid absolute start/end timestamps with UTC offsets; source wall clocks with unresolved timezones
+are not converted into timestamps. `return_by` needs an end time, and `time_window` needs both.
+Walking limits need valid route modes/distances, transport limits need route modes, and budget
+limits need explicit valid prices for referenced places/reservations. Missing evidence blocks hard
+constraints and produces warnings for soft constraints. Known zero estimates remain valid.
+
+A pure metadata note with no timing, source timing, place, reservation or route contributes no
+scheduled activity or cost. A note imported with `source_timing` retains its unresolved activity
+status. Unreferenced note/free-time entries without routes identify no travel leg; entries with
+activity references, source timing or routes still undergo route checks. Free time is not assumed
+free of cost: a budget check needs an explicit priced reference. These checks use recorded evidence
+and do not establish live route or price verification.
+
 ### 7. Separate approval credential
 
 The MCP server cannot approve its own proposals.

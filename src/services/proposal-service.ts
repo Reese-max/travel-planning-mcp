@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import type {
   ApprovalReceipt,
   AuditEvent,
@@ -63,10 +64,26 @@ function asStringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : undefined;
 }
 
-function hhmmFromIso(value: string | null | undefined): string | undefined {
-  if (!value) return undefined;
-  const match = value.match(/T(\d{2}:\d{2})/);
-  return match?.[1];
+const absoluteDateTimeSchema = z.iso.datetime({ offset: true });
+const transportModes = ['walking', 'transit', 'rail', 'taxi', 'car', 'bike'];
+
+function localDateTimeEvidence(value: unknown): string | undefined {
+  const parsed = absoluteDateTimeSchema.safeParse(value);
+  // A source wall clock without an offset/timezone must remain unresolved.
+  if (!parsed.success) return undefined;
+  let local = parsed.data.replace(/(?:Z|[+-]\d{2}:\d{2})$/, '');
+  if (local.length === 16) local += ':00';
+  return local.replace(/\.0+$/, '').replace(/(\.\d*?[1-9])0+$/, '$1');
+}
+
+function isMetadataOnlyNote(item: TripItem): boolean {
+  return item.type === 'note' && !item.place_id && !item.reservation_id && !item.route &&
+    item.start_at == null && item.end_at == null && !('source_timing' in item);
+}
+
+function requiresRouteEvidence(item: TripItem): boolean {
+  return (item.type !== 'note' && item.type !== 'free_time') ||
+    !!item.place_id || !!item.reservation_id || 'source_timing' in item;
 }
 
 function timestamp(value: string | null | undefined): number | undefined {
@@ -143,7 +160,7 @@ function hasEvaluableParameters(constraint: Constraint): boolean {
     case 'max_daily_budget': return nonnegative(parameters.amount) && typeof parameters.currency === 'string' && /^[A-Z]{3}$/.test(parameters.currency);
     case 'transport_mode': {
       const modes = asStringArray(parameters.allowed);
-      return !!modes?.length && modes.every((mode) => ['walking', 'transit', 'rail', 'taxi', 'car', 'bike'].includes(mode));
+      return !!modes?.length && modes.every((mode) => transportModes.includes(mode));
     }
     default: return false;
   }
@@ -639,11 +656,16 @@ export class ProposalService {
           const limit = asString(constraint.parameters.time);
           if (!limit) continue;
           for (const item of scopedItems) {
-            const time = hhmmFromIso(item.end_at ?? item.start_at);
-            if (time && time > limit) {
+            if (isMetadataOnlyNote(item)) continue;
+            const end = localDateTimeEvidence(item.end_at);
+            if (!end) {
+              pushConstraintResult(constraint, `cannot be evaluated safely: item ${item.item_id} has no valid end time with a UTC offset.`, result);
+              continue;
+            }
+            if (end > `${day.date}T${limit}:00`) {
               pushConstraintResult(
                 constraint,
-                `item ${item.item_id} ends at ${time}, after ${limit}.`,
+                `item ${item.item_id} ends at ${end}, after ${day.date}T${limit}.`,
                 result
               );
             }
@@ -654,11 +676,16 @@ export class ProposalService {
           const limit = asString(constraint.parameters.time);
           if (!limit) continue;
           for (const item of scopedItems) {
-            const time = hhmmFromIso(item.start_at);
-            if (time && time < limit) {
+            if (isMetadataOnlyNote(item)) continue;
+            const start = localDateTimeEvidence(item.start_at);
+            if (!start) {
+              pushConstraintResult(constraint, `cannot be evaluated safely: item ${item.item_id} has no valid start time with a UTC offset.`, result);
+              continue;
+            }
+            if (start < `${day.date}T${limit}:00`) {
               pushConstraintResult(
                 constraint,
-                `item ${item.item_id} starts at ${time}, before ${limit}.`,
+                `item ${item.item_id} starts at ${start}, before ${day.date}T${limit}.`,
                 result
               );
             }
@@ -670,9 +697,14 @@ export class ProposalService {
           const end = asString(constraint.parameters.end);
           if (!start || !end) continue;
           for (const item of scopedItems) {
-            const itemStart = hhmmFromIso(item.start_at);
-            const itemEnd = hhmmFromIso(item.end_at ?? item.start_at);
-            if ((itemStart && itemStart < start) || (itemEnd && itemEnd > end)) {
+            if (isMetadataOnlyNote(item)) continue;
+            const itemStart = localDateTimeEvidence(item.start_at);
+            const itemEnd = localDateTimeEvidence(item.end_at);
+            if (!itemStart || !itemEnd) {
+              pushConstraintResult(constraint, `cannot be evaluated safely: item ${item.item_id} needs valid start and end times with UTC offsets.`, result);
+              continue;
+            }
+            if (itemStart < `${day.date}T${start}:00` || itemEnd > `${day.date}T${end}:00`) {
               pushConstraintResult(
                 constraint,
                 `item ${item.item_id} falls outside allowed window ${start}-${end}.`,
@@ -702,12 +734,18 @@ export class ProposalService {
             constraint.parameters.kilometers_per_day ?? constraint.parameters.kilometers
           );
           if (maxKm === undefined) continue;
-          const walkingKm =
-            scopedItems.reduce(
-              (sum, item) =>
-                sum + (item.route?.mode === 'walking' ? item.route.distance_meters : 0),
-              0
-            ) / 1000;
+          let walkingMeters = 0;
+          for (const item of scopedItems) {
+            if (!requiresRouteEvidence(item) && !item.route) continue;
+            const route = item.route;
+            if (!route || !transportModes.includes(route.mode) ||
+              asNumber(route.distance_meters) === undefined || route.distance_meters < 0) {
+              pushConstraintResult(constraint, `cannot be evaluated safely: item ${item.item_id} has no valid route mode and distance.`, result);
+              continue;
+            }
+            if (route.mode === 'walking') walkingMeters += route.distance_meters;
+          }
+          const walkingKm = walkingMeters / 1000;
           if (walkingKm > maxKm) {
             pushConstraintResult(
               constraint,
@@ -724,20 +762,25 @@ export class ProposalService {
           let total = 0;
           let incompatibleCurrency = false;
 
+          const addCost = (cost: { amount: number; currency: string } | null | undefined, itemId: string): void => {
+            if (!cost || asNumber(cost.amount) === undefined || cost.amount < 0 ||
+              typeof cost.currency !== 'string' || !/^[A-Z]{3}$/.test(cost.currency)) {
+              pushConstraintResult(constraint, `cannot be evaluated safely: item ${itemId} has missing or invalid cost evidence.`, result);
+            } else if (cost.currency === currency) total += cost.amount;
+            else incompatibleCurrency = true;
+          };
+
           for (const item of scopedItems) {
+            if (!item.place_id && !item.reservation_id && !isMetadataOnlyNote(item)) {
+              pushConstraintResult(constraint, `cannot be evaluated safely: item ${item.item_id} has no priced place or reservation.`, result);
+            }
             if (item.place_id) {
               const cost = this.db.getPlace(item.place_id)?.planning?.estimated_cost;
-              if (cost) {
-                if (cost.currency === currency) total += cost.amount;
-                else incompatibleCurrency = true;
-              }
+              addCost(cost, item.item_id);
             }
             if (item.reservation_id) {
               const price = this.db.getReservation(item.reservation_id)?.price;
-              if (price) {
-                if (price.currency === currency) total += price.amount;
-                else incompatibleCurrency = true;
-              }
+              addCost(price, item.item_id);
             }
           }
 
@@ -757,8 +800,11 @@ export class ProposalService {
           const allowed = asStringArray(constraint.parameters.allowed);
           if (!allowed?.length) continue;
           for (const item of scopedItems) {
+            if (!requiresRouteEvidence(item) && !item.route) continue;
             const mode = item.route?.mode;
-            if (mode && !allowed.includes(mode)) {
+            if (!mode || !transportModes.includes(mode)) {
+              pushConstraintResult(constraint, `cannot be evaluated safely: item ${item.item_id} has no valid route mode.`, result);
+            } else if (!allowed.includes(mode)) {
               pushConstraintResult(
                 constraint,
                 `item ${item.item_id} uses ${mode}, allowed modes: ${allowed.join(', ')}.`,
