@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "research_issue": 6,
+  "checked_current_main": "dbb66acf1456f41e7e8a49e5b86603b3f0159aef",
+  "scope": "Public first-party documents and injected local fixtures only. No Google API, account, model, paid call, provider write or production purge.",
+  "selected_exit": "NARROW",
+  "applicable_account_agreement": "UNKNOWN",
+  "billing_region": "UNKNOWN",
+  "legal_interpretation": "UNKNOWN; no compliance determination",
+  "documents": [
+    {
+      "id": "platform-terms",
+      "requested_url": "https://cloud.google.com/maps-platform/terms",
+      "final_url": "https://cloud.google.com/maps-platform/terms",
+      "retrieved_at_utc": "2026-10-05T05:00:03.728539+00:00",
+      "http_status": 200,
+      "public_html_sha256": "18f201c4878b45277c10e470f2c6e2a908a1433d7d54cd3186dfd95bcdd6e4f4",
+      "public_html_bytes": 2435676,
+      "visible_document_version": [
+        "UNKNOWN: no visible fixed effective/version date identified for this public contract document"
+      ],
+      "selected_exact_public_text": [
+        "3.2.3 Restrictions Against Misusing the Services.",
+        "(b) No Caching. Customer will not cache Google Maps Content except as expressly permitted under the Maps Service Specific Terms."
+      ]
+    },
+    {
+      "id": "service-specific",
+      "requested_url": "https://cloud.google.com/maps-platform/terms/maps-service-terms",
+      "final_url": "https://cloud.google.com/maps-platform/terms/maps-service-terms",
+      "retrieved_at_utc": "2026-10-05T05:00:03.728975+00:00",
+      "http_status": 200,
+      "public_html_sha256": "36386a5d9d6bd3716ca48570a62238fe686761a28c347279c14762ceb0ad8d50",
+      "public_html_bytes": 2344496,
+      "visible_document_version": [
+        "UNKNOWN: no visible fixed effective/version date identified for this public contract document"
+      ],
+      "selected_exact_public_text": [
+        "3. Google ID Caching",
+        "Customer may cache the Google ID values from the Services that return such field and allow caching, in accordance with its Documentation. For example, Customer may cache (a) place_id from Places API, Directions API, Geolocation API and Routes API, (b) pano_ID, from Street View Static API, and (c) video_ID from Aerial View API.",
+        "14.1 Use without a Google Map. Customer may use Google Maps Content from the Places API in Customer Applications without a corresponding Google Map.",
+        "14.2 No use with a non-Google map. Customer must not use Google Maps Content from the Places API in conjunction with a non-Google map.",
+        "14.3 Caching. Customer may temporarily cache latitude and longitude values from the Places API for up to 30 consecutive calendar days, after which Customer must delete the cached latitude and longitude values."
+      ]
+    },
+    {
+      "id": "eea-service-specific",
+      "requested_url": "https://cloud.google.com/terms/maps-platform/eea/maps-service-terms",
+      "final_url": "https://cloud.google.com/terms/maps-platform/eea/maps-service-terms",
+      "retrieved_at_utc": "2026-10-05T05:00:03.729824+00:00",
+      "http_status": 200,
+      "public_html_sha256": "21f2f27653a495dd33f558f04ba531b0bd204c8524e50fbcc4d72ccc80488b4e",
+      "public_html_bytes": 2304159,
+      "visible_document_version": [
+        "UNKNOWN: no visible fixed effective/version date identified for this public contract document"
+      ],
+      "selected_exact_public_text": [
+        "These European Economic Area Service Specific Terms (the \"EEA Service Specific Terms\") are incorporated into the agreement under which Google has agreed to provide Google Maps Platform Services to Customer (the \"Agreement\").",
+        "Capitalized terms not defined in these EEA Service Specific Terms have the meaning established in the Agreement. For the purpose of these EEA Service Specific Terms, if the order is placed by a Reseller, then the term \"Customer\" as used below means Customer and/or Reseller based on which entity is accessing the applicable Service. These EEA Service Specific Terms apply to Customers who have a billing account address in the European Economic Area. If your billing account address is outside the European Economic Area, please see the Service Specific Terms as described at https://cloud.google.com/maps-platform/terms/maps-service-terms/.",
+        "3. Google ID Caching",
+        "Customer may cache the Google ID values from the Services that return such field and allow caching, in accordance with its Documentation. For example, Customer may cache (a) place_id from Places API, Directions API, Geolocation API and Routes API, (b) pano_ID, from Street View Static API, and (c) video_ID from Aerial View API.",
+        "15.1 No Use With any Map. Other than latitude, longitude, and place_id, Customer must not use Google Maps Content from the Places API With any Map.",
+        "15.2 Permitted Use. Other than latitude, longitude, and place_id, Customer may only use the Google Maps Content from the Places API as permitted by the Places API EEA Permitted Uses.",
+        "15.4 Caching. Customer may temporarily cache latitude and longitude values from the Places API for up to 30 consecutive calendar days, after which Customer must delete the cached latitude and longitude values."
+      ]
+    },
+    {
+      "id": "places-policies",
+      "requested_url": "https://developers.google.com/maps/documentation/places/web-service/policies",
+      "final_url": "https://developers.google.com/maps/documentation/places/web-service/policies",
+      "retrieved_at_utc": "2026-10-05T05:00:04.125798+00:00",
+      "http_status": 200,
+      "public_html_sha256": "0812d2261b10b7ecbc2476df0b33d7970135f10d2b7a54a9984a37f4b67d08b2",
+      "public_html_bytes": 216304,
+      "visible_document_version": [
+        "Last updated 2026-09-28 UTC."
+      ],
+      "selected_exact_public_text": [
+        "You can therefore store place ID values indefinitely.",
+        "Last updated 2026-09-28 UTC."
+      ]
+    },
+    {
+      "id": "place-id",
+      "requested_url": "https://developers.google.com/maps/documentation/places/web-service/place-id",
+      "final_url": "https://developers.google.com/maps/documentation/places/web-service/place-id",
+      "retrieved_at_utc": "2026-10-05T05:00:04.128849+00:00",
+      "http_status": 200,
+      "public_html_sha256": "8a51e46139a09427cf271d2e57d7c302c71f29cb06e24123c964ce7c9590683d",
+      "public_html_bytes": 205135,
+      "visible_document_version": [
+        "Last updated 2026-09-28 UTC."
+      ],
+      "selected_exact_public_text": [
+        "Place IDs can be stored and reused, but it's recommended to refresh them if they are over 12 months old.",
+        "have multiple different place IDs. Place IDs may change over time.",
+        "refreshing place IDs if they are more than 12 months old. You can refresh Place IDs at no",
+        "Last updated 2026-09-28 UTC."
+      ]
+    },
+    {
+      "id": "eea-permitted-uses",
+      "requested_url": "https://cloud.google.com/terms/maps-platform/eea-places-api-permitted-uses",
+      "final_url": "https://cloud.google.com/terms/maps-platform/eea-places-api-permitted-uses",
+      "retrieved_at_utc": "2026-10-05T05:00:04.233853+00:00",
+      "http_status": 200,
+      "public_html_sha256": "e624f1a152ec81403b5de2aa3d321ed2c3feb518c82d8addec0dd572dc8044d2",
+      "public_html_bytes": 2206458,
+      "visible_document_version": [
+        "UNKNOWN: no visible fixed effective/version date identified for this public contract document"
+      ],
+      "selected_exact_public_text": [
+        "Subject to the EEA Places API Service Specific Terms, Customers with a billing address in the EEA may only use the Google Maps Content from the Places API within Customer Applications to (collectively, the “Permitted Uses”):"
+      ]
+    }
+  ],
+  "current_source_flow": {
+    "field_mask": "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.types",
+    "path": [
+      "GooglePlaceProvider.search",
+      "Google response -> canonical Place",
+      "TravelStore.savePlace(normalized)",
+      "default MemoryStore (in-memory only)"
+    ],
+    "files": [
+      {
+        "path": "src/adapters/google-place-provider.ts",
+        "sha256_at_review": "3ae966fb1ef4e8e6989b2a6e87c145f43d1918b312be70def7599c0005913244"
+      },
+      {
+        "path": "src/adapters/demo-place-provider.ts",
+        "sha256_at_review": "07b7749b26db5369e27921f1001719f60e072cb75d5501b00adaec96352af4e6"
+      },
+      {
+        "path": "src/store/memory-store.ts",
+        "sha256_at_review": "63110db6b7f929d667b0a8283efe30bed36def7af982bc97aa1ec59159fd7619"
+      },
+      {
+        "path": "src/domain/types.ts",
+        "sha256_at_review": "53f90c4f05ef523385feb579b1668a36f1e2b3b2b93201de01d4c59acf054847"
+      },
+      {
+        "path": "tests/google-places-retention-research.test.ts",
+        "sha256_at_review": "d0e8c5034aa3736e9fb34b0c78bd9cd04951f1c67826581710c4ac905e9b39c9"
+      }
+    ]
+  },
+  "acceptance_mapping": {
+    "1": "Account agreement/billing region recorded UNKNOWN; public contract sections, retrieval date and exact hashes recorded.",
+    "2": "Existing field-level matrix distinguishes raw place ID, provider coordinates, other provider fields and user-owned planning intent; no blanket 30-day rule.",
+    "3": "Injected fetch runs actual GooglePlaceProvider and MemoryStore; expiry removes provider snapshot while preserving exact IDs/user intent; refresh exercises same/changed provider ID.",
+    "4": "Only local fixture and public documents; real account, runtime/provider and legal questions explicitly UNKNOWN.",
+    "5": "NARROW supports identity/user-metadata separation as a future design; production changes require a separate implementation decision."
+  }
+}

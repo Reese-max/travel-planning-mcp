@@ -106,6 +106,9 @@ Provider descriptors include a `live` flag. AI clients can call `get_provider_st
 - `get_constraints`
 - `get_trip_audit`
 - `get_change_proposal`
+- `list_external_trip_trips` — read-only TRIP trip listing; external IDs are not canonical stored IDs
+- `get_external_trip_preview` — read-only, redacted TRIP snapshot for planning research; does not import
+- `preview_external_trip_import` — read-only, redacted TRIP import preview; does not persist or authorize an import
 
 ### Planning
 

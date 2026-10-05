@@ -50,6 +50,16 @@ describe('Google Places durable-retention research fixture', () => {
     };
 
     expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://places.googleapis.com/v1/places:searchText',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-goog-fieldmask': 'places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.types'
+        })
+      })
+    );
+    expect(provider.get(normalized.place_id)).toEqual(normalized);
     expect(normalized.location).toEqual({ lat: 25.01, lng: 121.5, address: 'Fixture address' });
     expect(normalized.source.provider).toBe('google-places-new');
     expect(split.provider_snapshot.name).toBe('Fixture Museum');
@@ -69,6 +79,14 @@ describe('Google Places durable-retention research fixture', () => {
     const sameIdRefresh = (await fixtureProvider('fixture-google-id-1').provider.search({ query: 'fixture', limit: 1 })).places[0]!;
     const differentId = (await fixtureProvider('fixture-google-id-2').provider.search({ query: 'fixture', limit: 1 })).places[0]!;
     expect(sameIdRefresh.place_id).toBe(afterExpiry.identity.place_id);
+    const afterRefresh = {
+      ...afterExpiry,
+      provider_snapshot: splitForResearch(sameIdRefresh, '').provider_snapshot
+    };
+    expect(afterRefresh.identity).toEqual(afterExpiry.identity);
+    expect(tripReferences.days[0]?.items[0]?.place_id).toBe(afterRefresh.identity.place_id);
+    expect(afterRefresh.provider_snapshot.source.provider).toBe('google-places-new');
+    expect(afterRefresh.identity.user_metadata).not.toHaveProperty('name');
     expect(differentId.place_id).not.toBe(afterExpiry.identity.place_id);
   });
 });
