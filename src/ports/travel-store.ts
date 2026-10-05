@@ -22,7 +22,9 @@ export interface IdempotencyRecord {
  *
  * The current MemoryStore implements this interface. Durable implementations
  * (PostgreSQL, SQLite, etc.) should preserve the same versioning and approval
- * semantics rather than leaking database concerns into planner code.
+ * semantics rather than leaking database concerns into planner code. Multi-record
+ * writes such as an external import (places, trip v1, audit event) must run inside a
+ * single transaction, because MemoryStore has no such boundary.
  */
 export interface TravelStore {
   listTrips(): Trip[];

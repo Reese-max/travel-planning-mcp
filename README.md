@@ -106,6 +106,7 @@ Provider descriptors include a `live` flag. AI clients can call `get_provider_st
 - `get_constraints`
 - `get_trip_audit`
 - `get_change_proposal`
+- `get_change_proposal_review` (read-only server-derived before/after and current findings)
 - `list_external_trip_trips` — read-only TRIP trip listing; external IDs are not canonical stored IDs
 - `get_external_trip_preview` — read-only, redacted TRIP snapshot for planning research; does not import
 - `preview_external_trip_import` — read-only, redacted TRIP import preview; does not persist or authorize an import
@@ -123,6 +124,36 @@ Provider descriptors include a `live` flag. AI clients can call `get_provider_st
 - `rollback_trip` — disabled unless `ENABLE_ADMIN_MCP_WRITES=true`
 
 There is deliberately no MCP `approve_change_proposal` tool.
+
+The optional TRIP bridge stays read-only (`list_external_trip_trips`,
+`get_external_trip_preview`). Turning a preview into a canonical trip is an operator
+REST action, so no MCP tool can import external data.
+
+## Canonical import from an external trip
+
+`POST /v1/external/trips/:externalTripId/import` creates canonical trip v1 from an
+operator-configured TRIP snapshot after an explicit operator approval. It requires
+`X-Approval-Key` and `Idempotency-Key`, and re-reads the source snapshot server-side.
+Before approving import, the operator must review the read-only
+`preview_external_trip_import` result and include its exact `source_fingerprint` in the
+request body. A missing fingerprint is rejected with `400`; if the source changed after
+review, import returns `409 preview_stale`. The importer never guesses: undated days are
+reported as `MISSING_DATE` and skipped, source days that
+share a date are merged into one canonical day, items without a timezone keep their local
+wall clock in `source_timing` and get no `start_at`, and TRIP bookings never become
+`Reservation`s because they carry no start time. The response reports `unresolved_fields`
+(capped, with `counts.unresolved_total` for the full number), `warnings`, `counts`, and
+`conflicts` for the structural judgement calls the import had to make; repeating the same
+snapshot returns `status: "duplicate"` instead of creating a second canonical trip, and a
+retry replays the stored response without re-reading the source.
+Any later change to the imported trip must go through `create_change_proposal → validate →
+approval → apply`.
+
+The route needs the operator-configured TRIP instance (`TRIP_API_URL`,
+`TRIP_API_TOKEN`, `TRIP_INSTANCE_ID`); it returns `503` when it is not configured.
+Review the preview's unresolved fields and warnings before sending the explicit import
+approval request. In the curl example, replace the fingerprint placeholder with the
+exact 64-character value returned by the reviewed preview.
 
 ## REST API
 
@@ -146,7 +177,10 @@ GET  /v1/places/:placeId
 GET  /v1/reservations/:reservationId
 POST /v1/routes/estimate
 
+POST /v1/external/trips/:externalTripId/import
+
 GET  /v1/proposals/:proposalId
+GET  /v1/proposals/:proposalId/review
 POST /v1/proposals/:proposalId/validate
 POST /v1/proposals/:proposalId/approve
 POST /v1/proposals/:proposalId/reject
@@ -246,6 +280,17 @@ curl -X POST http://127.0.0.1:8787/v1/proposals/<proposal-id>/apply \
 
 The response includes `Idempotent-Replayed: true` when an earlier successful result was replayed.
 
+Example operator-approved external import:
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/external/trips/12/import \
+  -H "Authorization: Bearer $TRAVEL_API_KEY" \
+  -H "X-Approval-Key: $APPROVAL_API_KEY" \
+  -H "Idempotency-Key: import-trip-12-v1" \
+  -H "Content-Type: application/json" \
+  -d '{"actor_id":"human-reviewer","traveler_display_name":"Trip Owner","source_fingerprint":"<64-character fingerprint from the reviewed preview>"}'
+```
+
 ## Current limitations
 
 This is still an MVP foundation:
@@ -268,3 +313,5 @@ The next major steps are a durable `TravelStore`, real Places + Routes adapters,
 ## License
 
 MIT
+
+Read-only proposal comparisons and estimate limits are documented in [docs/proposal-review.md](docs/proposal-review.md). The endpoint/tool adds no App approval UI or upstream writeback; Issue #7 remains partially implemented.

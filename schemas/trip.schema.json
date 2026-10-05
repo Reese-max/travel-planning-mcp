@@ -98,6 +98,24 @@
                       "additionalProperties": false
                     }
                   ]
+                },
+                "source_timing": {
+                  "description": "Provider-reported local timing kept as provenance; never an absolute instant.",
+                  "oneOf": [
+                    { "type": "null" },
+                    {
+                      "type": "object",
+                      "required": ["provider", "source_id", "local_date", "local_time", "timezone"],
+                      "properties": {
+                        "provider": { "type": "string" },
+                        "source_id": { "type": "string" },
+                        "local_date": { "type": ["string", "null"], "format": "date" },
+                        "local_time": { "type": ["string", "null"] },
+                        "timezone": { "type": ["string", "null"] }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               },
               "additionalProperties": false
@@ -113,7 +131,37 @@
       "items": { "type": "string", "format": "uuid" }
     },
     "created_at": { "type": "string", "format": "date-time" },
-    "updated_at": { "type": "string", "format": "date-time" }
+    "updated_at": { "type": "string", "format": "date-time" },
+    "import_source": {
+      "description": "Provenance of a trip created by an explicitly approved external import.",
+      "type": ["object", "null"],
+      "required": [
+        "provider",
+        "source_trip_id",
+        "source_fingerprint",
+        "live",
+        "imported_at",
+        "imported_by",
+        "approved_by",
+        "approved_at",
+        "approval_channel"
+      ],
+      "properties": {
+        "provider": { "type": "string" },
+        "instance_id": { "type": ["string", "null"] },
+        "source_trip_id": { "type": "string" },
+        "source_fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "live": { "type": "boolean" },
+        "preview_retrieved_at": { "type": ["string", "null"], "format": "date-time" },
+        "imported_at": { "type": "string", "format": "date-time" },
+        "imported_by": { "type": "string" },
+        "approved_by": { "type": "string" },
+        "approved_at": { "type": "string", "format": "date-time" },
+        "approval_channel": { "enum": ["http", "admin", "ui"] },
+        "note": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false
 }

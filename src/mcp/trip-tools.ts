@@ -2,15 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { TripReadClient, TripReadError } from '../adapters/trip-read-client.js';
 
-export function tripClientFromEnv(env: NodeJS.ProcessEnv = process.env): TripReadClient | undefined {
-  const values = [env.TRIP_API_URL, env.TRIP_API_TOKEN, env.TRIP_INSTANCE_ID];
-  if (values.every((value) => !value)) return undefined;
-  if (values.some((value) => !value)) throw new TripReadError('CONFIG',
-    'Set TRIP_API_URL, TRIP_API_TOKEN and TRIP_INSTANCE_ID together, or leave all unset.');
-  return new TripReadClient({
-    baseUrl: env.TRIP_API_URL!, apiToken: env.TRIP_API_TOKEN!, instanceId: env.TRIP_INSTANCE_ID!
-  });
-}
+export { tripClientFromEnv } from '../adapters/trip-client-env.js';
 
 export function registerTripReadTools(server: McpServer, client: TripReadClient): void {
   const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };

@@ -65,6 +65,22 @@ export class TripReadError extends Error {
   constructor(public readonly code: string, message: string) { super(message); }
 }
 
+function configuredInstanceId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(value)) {
+    throw new TripReadError('CONFIG', 'TRIP_INSTANCE_ID must be an opaque stable identifier.');
+  }
+  return value;
+}
+
+/** Stable source identity: endpoint aliases and provider credentials are not identifiers. */
+export function tripSourceIdentity(instanceId: string, externalTripId: number) {
+  const instance = configuredInstanceId(instanceId);
+  if (!Number.isSafeInteger(externalTripId) || externalTripId <= 0) {
+    throw new TripReadError('INPUT', 'external_trip_id must be a positive safe integer.');
+  }
+  return { provider: 'trip' as const, instance_id: instance, source_trip_id: String(externalTripId) };
+}
+
 export interface TripImportPreview {
   source: 'trip';
   instance_id: string;
@@ -131,9 +147,7 @@ export class TripReadClient {
       (base.protocol !== 'https:' && !(base.protocol === 'http:' && loopback))) {
       throw new TripReadError('CONFIG', 'TRIP requires HTTPS, or HTTP on loopback only; URL credentials/query/fragment are forbidden.');
     }
-    if (!/^[A-Za-z0-9_-]{1,80}$/.test(options.instanceId)) {
-      throw new TripReadError('CONFIG', 'TRIP_INSTANCE_ID must be an opaque stable identifier.');
-    }
+    const instanceId = configuredInstanceId(options.instanceId);
     if (!options.apiToken.trim() || /[\r\n]/.test(options.apiToken)) {
       throw new TripReadError('CONFIG', 'TRIP_API_TOKEN is missing or invalid.');
     }
@@ -146,7 +160,7 @@ export class TripReadClient {
     base.pathname = `${base.pathname.replace(/\/+$/, '')}/`;
     this.base = base;
     this.token = options.apiToken;
-    this.instanceId = options.instanceId;
+    this.instanceId = instanceId;
     this.request = options.fetchImpl ?? fetch;
   }
 
@@ -201,20 +215,20 @@ export class TripReadClient {
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 100) {
       throw new TripReadError('INPUT', 'Invalid pagination.');
     }
+    const instanceId = configuredInstanceId(this.instanceId);
     const parsed = summariesSchema.safeParse(await this.read('api/trips'));
     if (!parsed.success) throw new TripReadError('SCHEMA', 'TRIP list response does not match the pinned contract.');
     const trips = parsed.data.slice(offset, offset + limit).map((trip) => ({
-      external_trip_id: trip.id, mapped_trip_id: tripExternalId(this.instanceId, 'trip', trip.id),
+      external_trip_id: trip.id, mapped_trip_id: tripExternalId(instanceId, 'trip', trip.id),
       title: trip.name, archived: trip.archived, day_count: trip.days
     }));
-    return { provider: 'trip', instance_id: this.instanceId, live: true, retrieved_at: new Date().toISOString(),
+    return { provider: 'trip', instance_id: instanceId, live: true, retrieved_at: new Date().toISOString(),
       trips, total: parsed.data.length, next_offset: offset + limit < parsed.data.length ? offset + limit : null };
   }
 
   async previewTrip(externalTripId: number) {
-    if (!Number.isSafeInteger(externalTripId) || externalTripId <= 0) {
-      throw new TripReadError('INPUT', 'external_trip_id must be a positive safe integer.');
-    }
+    const sourceIdentity = tripSourceIdentity(this.instanceId, externalTripId);
+    const instanceId = sourceIdentity.instance_id;
     const raw = await this.read(`api/trips/${externalTripId}`);
     const parsed = tripSchema.safeParse(raw);
     if (!parsed.success) throw new TripReadError('SCHEMA', 'TRIP detail response does not match the pinned contract.');
@@ -225,7 +239,7 @@ export class TripReadClient {
     const placeMap = new Map<number, Place>();
     const mapPlace = (source: z.infer<typeof placeSchema>) => {
       const place: Place = {
-        place_id: tripExternalId(this.instanceId, 'place', source.id), name: source.name,
+        place_id: tripExternalId(instanceId, 'place', source.id), name: source.name,
         categories: [source.category?.name || 'uncategorized'],
         location: { lat: source.lat, lng: source.lng, address: source.place, timezone: null },
         external_ids: { trip_place_id: String(source.id) },
@@ -259,7 +273,7 @@ export class TripReadClient {
         issues.push({ code: 'INCOMPLETE_TIMING', source_id: item.id,
           message: 'Timezone, end time and transfer feasibility need explicit resolution before canonical import.' });
         return {
-          external_item_id: item.id, mapped_item_id: tripExternalId(this.instanceId, 'item', item.id),
+          external_item_id: item.id, mapped_item_id: tripExternalId(instanceId, 'item', item.id),
           title: item.text, mapped_place_id: item.place ? mapPlace(item.place) : null,
           local_date: day.dt, local_time: localTime, timezone: null,
           coordinates: item.lat != null && item.lng != null ? { lat: item.lat, lng: item.lng } : null,
@@ -272,17 +286,17 @@ export class TripReadClient {
         issues.push({ code: 'BOOKING_TIMING_UNKNOWN', source_id: booking.id,
           message: 'TRIP booking has no start/end time or confirmation status; not converted into a Reservation.' });
         return { external_booking_id: booking.id,
-          mapped_reservation_id: tripExternalId(this.instanceId, 'reservation', booking.id),
+          mapped_reservation_id: tripExternalId(instanceId, 'reservation', booking.id),
           title: booking.label, source_type: booking.type, fixed: true, local_date: day.dt };
       });
       return { external_day_id: day.id, label: day.label, date: day.dt, items, unresolved_bookings: unresolvedBookings };
     });
     return {
-      provider: 'trip', instance_id: this.instanceId, live: true, retrieved_at: retrievedAt,
-      source_fingerprint: createHash('sha256').update(stable(raw)).digest('hex'),
+      provider: 'trip', instance_id: instanceId, live: true, retrieved_at: retrievedAt,
+      source_fingerprint: createHash('sha256').update(stable({ source: sourceIdentity, snapshot: raw })).digest('hex'),
       fingerprint_is_atomic_version: false, persisted: false, writeback_supported: false,
       mode: 'read_preview_only' as const, external_trip_id: trip.id,
-      mapped_trip_id: tripExternalId(this.instanceId, 'trip', trip.id), title: trip.name,
+      mapped_trip_id: tripExternalId(instanceId, 'trip', trip.id), title: trip.name,
       archived: trip.archived, currency: trip.currency, places: [...placeMap.values()], days, issues,
       warnings: [
         'This is an external read preview, not a stored canonical Trip or an approved ChangeProposal.',
