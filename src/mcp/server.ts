@@ -250,6 +250,19 @@ export function createServer(): McpServer {
   );
 
   server.registerTool(
+    'get_change_proposal_review',
+    {
+      description: 'Read server-derived before/after, grouped changes, current validation and explicit unknown estimates. Does not change lifecycle, approve, apply or write back.',
+      inputSchema: { proposal_id: z.string().uuid() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+    },
+    async ({ proposal_id }) => {
+      try { return result(proposalService.review(proposal_id)); }
+      catch (error) { return failure(error); }
+    }
+  );
+
+  server.registerTool(
     'apply_change_proposal',
     {
       description: 'Apply a successfully validated proposal only after an external human-controlled surface has attached an explicit approval receipt. This MCP server cannot approve proposals.',

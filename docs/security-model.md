@@ -57,6 +57,27 @@ Hard violations block validation/apply. Soft violations are retained as warnings
 
 If a hard constraint type cannot yet be evaluated safely, validation fails conservatively instead of pretending the constraint passed.
 
+Supported constraints also require usable parameters and itinerary evidence. Temporal checks need
+valid absolute start/end timestamps with UTC offsets and an authoritative clock for the day's
+constraint boundaries. An explicit `parameters.timezone` takes precedence; otherwise the timezone
+of `TripDay.base_place_id` establishes the day clock. Missing or invalid explicit timezones do not
+fall back to another clock. Item offsets, activity places and unresolved `source_timing` cannot
+establish this policy context. Boundaries in daylight-saving gaps or folds cannot be evaluated
+safely. Absolute instants are compared against the unique boundary, so equivalent timestamp
+representations have the same outcome. `return_by` needs an end time, and `time_window` needs both.
+Walking limits need valid route modes/distances, transport limits need route modes, and budget
+limits need explicit valid prices for referenced places/reservations. Missing evidence blocks hard
+constraints and produces warnings for soft constraints. Known zero estimates remain valid.
+
+A pure metadata note with no timing, source timing, place, reservation or route and either absent
+duration or an explicit finite numeric zero contributes no scheduled activity or cost. Present
+unknown, malformed or nonzero duration makes a note operational and subject to time, price and
+route evidence checks. A note imported with `source_timing` retains its unresolved activity status.
+Unreferenced free-time entries without routes identify no travel leg; entries with activity
+references, source timing or routes still undergo route checks. Free time is not assumed
+free of cost: a budget check needs an explicit priced reference. These checks use recorded evidence
+and do not establish live route or price verification.
+
 ### 7. Separate approval credential
 
 The MCP server cannot approve its own proposals.
@@ -113,7 +134,27 @@ Applying or rolling back creates a new trip version. Historical versions are not
 
 ### 13. Audit trail
 
-The current store records proposal creation, validation, approval, rejection, application, and rollback events. Audit data is still in-memory in the MVP and must move to durable storage before production.
+The current store records proposal creation, validation, approval, rejection, application, rollback, and externally approved import events. Audit data is still in-memory in the MVP and must move to durable storage before production.
+
+### 14. External import is operator-only
+
+Canonical import of an external trip snapshot is exposed on the REST surface only
+(`POST /v1/external/trips/{externalTripId}/import`) and requires the separate approval
+credential plus an `Idempotency-Key`. There is deliberately no MCP import tool, so an AI
+client cannot turn a preview into stored canonical data.
+
+The server re-reads the source snapshot itself instead of trusting a payload supplied by
+the caller, and it re-derives every instance-scoped ID mapping before writing. The request
+requires the `source_fingerprint` from the snapshot the operator actually reviewed;
+missing fingerprints fail with `400`, and a changed upstream source fails with `409`.
+Both the reviewed fingerprint and the import retry scope bind the provider, configured
+stable instance ID and source trip ID. Identical contents from another instance cannot
+reuse that review or replay its completed import response. API credentials and endpoint
+aliases are excluded, so rotating them within the same instance preserves retries.
+A missing or invalid configured instance ID fails before receipt lookup or source reads;
+previews issued with the earlier content-only fingerprint must be fetched and reviewed again.
+Re-importing the same snapshot reports a
+duplicate instead of creating a second canonical trip.
 
 ## Current credential rules
 

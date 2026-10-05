@@ -1,0 +1,756 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://travel-planning-mcp.dev/schemas/proposal-review.schema.json",
+  "title": "Read-only server-derived proposal review",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "proposal-review/v1"
+    },
+    "read_only": {
+      "const": true
+    },
+    "proposal_id": {
+      "type": "string"
+    },
+    "trip_id": {
+      "type": "string"
+    },
+    "lifecycle_status": {
+      "enum": [
+        "draft",
+        "validating",
+        "validated",
+        "needs_review",
+        "approved",
+        "rejected",
+        "applied",
+        "expired"
+      ]
+    },
+    "base_trip_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "current_trip_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "stale": {
+      "type": "boolean"
+    },
+    "before": {
+      "$ref": "#/$defs/snapshot"
+    },
+    "after": {
+      "$ref": "#/$defs/snapshot"
+    },
+    "after_is_simulation": {
+      "const": true
+    },
+    "changes": {
+      "type": "object",
+      "properties": {
+        "added": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/item"
+          }
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/item"
+          }
+        },
+        "moved": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/change"
+          }
+        },
+        "updated": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/change"
+          }
+        }
+      },
+      "required": [
+        "added",
+        "removed",
+        "moved",
+        "updated"
+      ],
+      "additionalProperties": false
+    },
+    "impact": {
+      "type": "object",
+      "properties": {
+        "travel_minutes": {
+          "$ref": "#/$defs/metric"
+        },
+        "walking_km": {
+          "$ref": "#/$defs/metric"
+        },
+        "route_observations": {
+          "type": "object",
+          "properties": {
+            "before": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "item_id": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "calculated_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "live": {
+                    "const": "UNKNOWN"
+                  }
+                },
+                "required": [
+                  "item_id",
+                  "source",
+                  "calculated_at",
+                  "live"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "after": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "item_id": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "calculated_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "live": {
+                    "const": "UNKNOWN"
+                  }
+                },
+                "required": [
+                  "item_id",
+                  "source",
+                  "calculated_at",
+                  "live"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "before",
+            "after"
+          ],
+          "additionalProperties": false
+        },
+        "cost": {
+          "$ref": "#/$defs/cost"
+        }
+      },
+      "required": [
+        "travel_minutes",
+        "walking_km",
+        "route_observations",
+        "cost"
+      ],
+      "additionalProperties": false
+    },
+    "validation": {
+      "type": "object",
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "validated_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hard_constraint_violations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "soft_constraint_warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "valid",
+        "hard_constraint_violations",
+        "soft_constraint_warnings",
+        "conflicts"
+      ],
+      "additionalProperties": false
+    },
+    "operator_approval_attached": {
+      "type": "boolean"
+    },
+    "approval_authority": {
+      "const": false
+    },
+    "writeback_supported": {
+      "const": false
+    },
+    "source_identity": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "instance_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source_trip_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider",
+            "instance_id",
+            "source_trip_id"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "receipt": {
+      "type": "object",
+      "properties": {
+        "observed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proposal_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "base_trip_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "current_trip_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "simulated_trip_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "observed_at",
+        "proposal_hash",
+        "base_trip_hash",
+        "current_trip_hash",
+        "simulated_trip_hash"
+      ],
+      "additionalProperties": false
+    },
+    "review_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "read_only",
+    "proposal_id",
+    "trip_id",
+    "lifecycle_status",
+    "base_trip_version",
+    "current_trip_version",
+    "stale",
+    "before",
+    "after",
+    "after_is_simulation",
+    "changes",
+    "impact",
+    "validation",
+    "operator_approval_attached",
+    "approval_authority",
+    "writeback_supported",
+    "source_identity",
+    "receipt",
+    "review_id"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "item": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "place_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reservation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "start_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "end_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration_minutes": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "route": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "walking",
+                    "transit",
+                    "rail",
+                    "taxi",
+                    "car",
+                    "bike"
+                  ]
+                },
+                "duration_minutes": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "distance_meters": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "source": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "calculated_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "live": {
+                  "const": "UNKNOWN"
+                }
+              },
+              "required": [
+                "mode",
+                "duration_minutes",
+                "distance_meters",
+                "source",
+                "calculated_at",
+                "live"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "source_timing": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "local_date": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "local_time": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "timezone": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "provider",
+                "source_id",
+                "local_date",
+                "local_time",
+                "timezone"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "item_id",
+        "date",
+        "position",
+        "type",
+        "title",
+        "place_id",
+        "reservation_id",
+        "start_at",
+        "end_at",
+        "duration_minutes",
+        "locked",
+        "route",
+        "source_timing"
+      ],
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "type": "object",
+      "properties": {
+        "trip_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "start_date": {
+          "type": "string"
+        },
+        "end_date": {
+          "type": "string"
+        },
+        "days": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "date": {
+                "type": "string"
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/item"
+                }
+              }
+            },
+            "required": [
+              "date",
+              "items"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "trip_id",
+        "version",
+        "title",
+        "start_date",
+        "end_date",
+        "days"
+      ],
+      "additionalProperties": false
+    },
+    "change": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string"
+        },
+        "before": {
+          "$ref": "#/$defs/item"
+        },
+        "after": {
+          "$ref": "#/$defs/item"
+        },
+        "changed_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "redacted_fields": {
+          "type": "array",
+          "items": {
+            "const": "notes"
+          }
+        }
+      },
+      "required": [
+        "item_id",
+        "before",
+        "after",
+        "changed_fields",
+        "redacted_fields"
+      ],
+      "additionalProperties": false
+    },
+    "metric": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "UNKNOWN",
+            "RECORDED_ESTIMATE"
+          ]
+        },
+        "before_known": {
+          "type": "number",
+          "minimum": 0
+        },
+        "after_known": {
+          "type": "number",
+          "minimum": 0
+        },
+        "delta": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "missing_before": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing_after": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "status",
+        "before_known",
+        "after_known",
+        "delta",
+        "reason",
+        "missing_before",
+        "missing_after"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "UNKNOWN"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "delta": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "cost": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "UNKNOWN",
+            "RECORDED_ESTIMATE"
+          ]
+        },
+        "basis": {
+          "type": "string"
+        },
+        "currency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "before_known": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "after_known": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "delta": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "missing_before": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing_after": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "basis",
+        "currency",
+        "before_known",
+        "after_known",
+        "delta",
+        "missing_before",
+        "missing_after",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "UNKNOWN"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "delta": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

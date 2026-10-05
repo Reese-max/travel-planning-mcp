@@ -26,6 +26,11 @@ Reads a redacted TRIP snapshot and returns a structured import preview with
 or authorizes an import. Missing dates, timezones, and booking times remain
 unresolved.
 
+### `get_change_proposal_review`
+Reads server-derived immutable-base before/after, grouped changes, current validation,
+redacted-note indicators and explicit UNKNOWN estimates. Does not update lifecycle,
+approve, apply, contact providers or write back. See [proposal-review.md](proposal-review.md).
+
 ### `get_change_proposal`
 Reads one proposal and its validation result.
 
@@ -58,6 +63,8 @@ The following tools should not be added without a design review:
 - arbitrary shell execution
 - direct provider credential access
 - a tool that approves its own AI-generated proposal
+- an external trip import tool (import is an operator REST action behind the separate
+  approval credential; the TRIP bridge stays read-only)
 
 ## Typical flow
 
