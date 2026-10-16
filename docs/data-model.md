@@ -27,6 +27,14 @@ Important fields:
 - `reservation_ids`: references to formal bookings.
 - `constraint_ids`: references to hard and soft planning rules.
 - `change_proposal_ids`: audit trail of proposals that were applied to this trip lineage.
+- `import_source`: provenance of a trip created by an explicitly approved external import
+  (provider, instance, source trip id, source fingerprint, live flag, `imported_at`,
+  and the approving operator). It records where trip v1 came from; it is not provider
+  data about places.
+
+Imported items may carry `source_timing` (provider, source id, local date, local time,
+timezone). It is provenance for an unresolved local wall-clock time and never stands in
+for `start_at`: the canonical model only accepts absolute instants in `start_at`/`end_at`.
 
 ## Place
 
