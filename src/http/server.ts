@@ -2,9 +2,18 @@ import { timingSafeEqual } from 'node:crypto';
 import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { z } from 'zod';
 import { placeProvider } from '../adapters/demo-place-provider.js';
+import { tripClientFromEnv } from '../adapters/trip-client-env.js';
+import { TripReadClient, TripReadError, tripSourceIdentity } from '../adapters/trip-read-client.js';
 import type { ChangeOperation, TransportMode } from '../domain/types.js';
+import {
+  ExternalImportApprovalError,
+  ExternalImportConflictError,
+  ExternalImportPreviewError,
+  externalTripImportService
+} from '../services/external-trip-import-service.js';
 import { idempotencyService, IdempotencyConflictError } from '../services/idempotency-service.js';
 import { proposalService, ProposalLifecycleConflictError } from '../services/proposal-service.js';
+import { ProposalReviewConflictError } from '../services/proposal-review.js';
 import { routeService } from '../services/route-service.js';
 import { tripContextService } from '../services/trip-context-service.js';
 import { store } from '../store/memory-store.js';
@@ -50,11 +59,20 @@ const rollbackSchema = z.object({
   actor_id: z.string().min(1)
 });
 
+const externalTripImportSchema = z.object({
+  actor_id: z.string().min(1),
+  traveler_display_name: z.string().min(1).max(200),
+  source_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  note: z.string().max(2000).optional()
+});
+
 export interface HttpServerOptions {
   host?: string;
   port?: number;
   travelApiKey?: string;
   approvalApiKey?: string;
+  /** Read-only external source used by the operator-approved import route. */
+  tripClient?: TripReadClient;
 }
 
 function isLoopback(host: string): boolean {
@@ -133,7 +151,16 @@ function parsePositiveInt(value: string | null): number | undefined {
 }
 
 function errorStatus(error: unknown): number {
-  if (error instanceof IdempotencyConflictError || error instanceof ProposalLifecycleConflictError) return 409;
+  if (error instanceof IdempotencyConflictError || error instanceof ProposalLifecycleConflictError || error instanceof ProposalReviewConflictError) return 409;
+  if (error instanceof ExternalImportConflictError) return 409;
+  if (error instanceof ExternalImportApprovalError || error instanceof ExternalImportPreviewError) return 400;
+  if (error instanceof TripReadError) {
+    // CONFIG means this deployment is misconfigured and INPUT means the caller sent a
+    // bad id; neither is an upstream gateway failure.
+    if (error.code === 'CONFIG') return 500;
+    if (error.code === 'INPUT') return 400;
+    return 502;
+  }
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes('not found') || message.includes('not found:')) return 404;
   if (
@@ -193,6 +220,7 @@ export function createHttpServer(options: HttpServerOptions = {}) {
   const port = options.port ?? Number(process.env.PORT ?? 8787);
   const travelApiKey = options.travelApiKey ?? process.env.TRAVEL_API_KEY;
   const approvalApiKey = options.approvalApiKey ?? process.env.APPROVAL_API_KEY;
+  const tripClient = options.tripClient ?? tripClientFromEnv();
 
   if (!isLoopback(host) && !travelApiKey) {
     throw new Error('TRAVEL_API_KEY is required when binding the REST API to a non-loopback host.');
@@ -300,6 +328,59 @@ export function createHttpServer(options: HttpServerOptions = {}) {
         return;
       }
 
+      if (
+        method === 'POST' &&
+        segments[0] === 'v1' &&
+        segments[1] === 'external' &&
+        segments[2] === 'trips' &&
+        segments[3] &&
+        segments[4] === 'import' &&
+        segments.length === 5
+      ) {
+        const externalTripId = Number(segments[3]);
+        if (!Number.isSafeInteger(externalTripId) || externalTripId <= 0) {
+          sendJson(res, 400, { error: 'invalid_request', message: 'external trip id must be a positive integer.' });
+          return;
+        }
+        if (!requireApproval(req, res, approvalApiKey)) return;
+        const key = requireIdempotencyKey(req, res);
+        if (!key) return;
+        if (!tripClient) {
+          sendJson(res, 503, { error: 'external_source_not_configured' });
+          return;
+        }
+        const body = externalTripImportSchema.parse(await readJson(req));
+        // Validate the configured source before looking up a prior receipt.
+        const sourceIdentity = tripSourceIdentity(tripClient.instanceId, externalTripId);
+        const scope = `import-external-trip:${sourceIdentity.provider}:${sourceIdentity.instance_id}:${sourceIdentity.source_trip_id}`;
+        // A stored result wins before any upstream read, so a retry replays the
+        // original response instead of depending on current source state.
+        const stored = idempotencyService.replayIfStored(scope, key, body);
+        if (stored) {
+          sendIdempotent(res, stored);
+          return;
+        }
+        // Re-read the source server-side so a caller cannot import an unreviewed payload.
+        const preview = await tripClient.previewTrip(externalTripId);
+        if (body.source_fingerprint !== preview.source_fingerprint) {
+          sendJson(res, 409, {
+            error: 'preview_stale',
+            message: 'Source identity or snapshot changed since the reviewed preview fingerprint.'
+          });
+          return;
+        }
+        const outcome = await idempotencyService.execute(scope, key, body, () => {
+          const report = externalTripImportService.importPreview(preview, {
+            actorId: body.actor_id,
+            travelerDisplayName: body.traveler_display_name,
+            ...(body.note !== undefined ? { note: body.note } : {})
+          });
+          return { status: report.status === 'imported' ? 201 : 200, body: report };
+        });
+        sendIdempotent(res, outcome);
+        return;
+      }
+
       if (segments[0] === 'v1' && segments[1] === 'trips' && segments[2]) {
         const tripId = segments[2];
 
@@ -404,6 +485,11 @@ export function createHttpServer(options: HttpServerOptions = {}) {
           return;
         }
 
+        if (method === 'GET' && segments[3] === 'review' && segments.length === 4) {
+          sendJson(res, 200, proposalService.review(proposalId));
+          return;
+        }
+
         if (method === 'POST' && segments[3] === 'validate' && segments.length === 4) {
           sendJson(res, 200, proposalService.validate(proposalId));
           return;
@@ -471,7 +557,10 @@ export function createHttpServer(options: HttpServerOptions = {}) {
         return;
       }
       sendJson(res, errorStatus(error), {
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof ExternalImportPreviewError || error instanceof TripReadError
+          ? { code: error.code }
+          : {})
       });
     }
   });

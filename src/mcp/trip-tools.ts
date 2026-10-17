@@ -2,15 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { TripReadClient, TripReadError } from '../adapters/trip-read-client.js';
 
-export function tripClientFromEnv(env: NodeJS.ProcessEnv = process.env): TripReadClient | undefined {
-  const values = [env.TRIP_API_URL, env.TRIP_API_TOKEN, env.TRIP_INSTANCE_ID];
-  if (values.every((value) => !value)) return undefined;
-  if (values.some((value) => !value)) throw new TripReadError('CONFIG',
-    'Set TRIP_API_URL, TRIP_API_TOKEN and TRIP_INSTANCE_ID together, or leave all unset.');
-  return new TripReadClient({
-    baseUrl: env.TRIP_API_URL!, apiToken: env.TRIP_API_TOKEN!, instanceId: env.TRIP_INSTANCE_ID!
-  });
-}
+export { tripClientFromEnv } from '../adapters/trip-client-env.js';
 
 export function registerTripReadTools(server: McpServer, client: TripReadClient): void {
   const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
@@ -34,4 +26,9 @@ export function registerTripReadTools(server: McpServer, client: TripReadClient)
     annotations,
     inputSchema: { external_trip_id: z.number().int().positive().safe() }
   }, async ({ external_trip_id }) => result(() => client.previewTrip(external_trip_id)));
+  server.registerTool('preview_external_trip_import', {
+    description: 'Preview normalization from TRIP into the canonical model without persisting, importing, or authorizing a change. Missing dates, timezones, and booking times remain unresolved.',
+    annotations,
+    inputSchema: { external_trip_id: z.number().int().positive().safe() }
+  }, async ({ external_trip_id }) => result(() => client.previewImport(external_trip_id)));
 }
