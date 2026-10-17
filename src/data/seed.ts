@@ -77,7 +77,7 @@ export const seedConstraints: Constraint[] = [
     strength: 'hard',
     enabled: true,
     scope: { trip: true },
-    parameters: { time: '21:00' },
+    parameters: { time: '21:00', timezone: 'Asia/Tokyo' },
     reason: 'Return to the hotel by 21:00.',
     created_by: 'user'
   },

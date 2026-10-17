@@ -52,7 +52,7 @@
     },
     "parameters": {
       "type": "object",
-      "description": "Typed by constraint type at the application layer. Examples: {time:'21:00'}, {kilometers_per_day:8}, {amount:12000,currency:'JPY'}.",
+      "description": "Typed by constraint type at the application layer. Temporal constraints use an explicit timezone or the designated day base place's timezone. Examples: {time:'21:00',timezone:'Asia/Tokyo'}, {kilometers_per_day:8}, {amount:12000,currency:'JPY'}.",
       "additionalProperties": true
     },
     "reason": { "type": ["string", "null"] },

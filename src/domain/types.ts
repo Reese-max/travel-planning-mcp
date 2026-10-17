@@ -120,6 +120,31 @@ export interface RouteSnapshot {
   calculated_at?: string | null;
 }
 
+/** Provider-reported local timing kept as provenance; never an absolute instant. */
+export interface ItemSourceTiming {
+  provider: string;
+  source_id: string;
+  local_date: string | null;
+  local_time: string | null;
+  timezone: string | null;
+}
+
+/** Provenance of a trip created by an explicitly approved external import. */
+export interface TripImportSource {
+  provider: string;
+  instance_id?: string | null;
+  source_trip_id: string;
+  source_fingerprint: string;
+  live: boolean;
+  preview_retrieved_at?: string | null;
+  imported_at: string;
+  imported_by: string;
+  approved_by: string;
+  approved_at: string;
+  approval_channel: ApprovalReceipt['channel'];
+  note?: string | null;
+}
+
 export interface TripItem {
   item_id: string;
   type: 'place' | 'reservation' | 'transit' | 'meal' | 'free_time' | 'note';
@@ -132,6 +157,7 @@ export interface TripItem {
   locked: boolean;
   notes?: string | null;
   route?: RouteSnapshot | null;
+  source_timing?: ItemSourceTiming | null;
 }
 
 export interface TripDay {
@@ -166,6 +192,7 @@ export interface Trip {
   change_proposal_ids?: string[];
   created_at: string;
   updated_at: string;
+  import_source?: TripImportSource;
 }
 
 export type ChangeOperationType = 'add' | 'remove' | 'move' | 'update' | 'replace';
@@ -242,7 +269,8 @@ export type AuditEventType =
   | 'proposal_approved'
   | 'proposal_rejected'
   | 'proposal_applied'
-  | 'trip_rolled_back';
+  | 'trip_rolled_back'
+  | 'external_trip_imported';
 
 export interface AuditEvent {
   event_id: string;
