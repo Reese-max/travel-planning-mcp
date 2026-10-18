@@ -55,7 +55,7 @@ Source inspection is separate from executed regression coverage:
 | B05 | Shift worker using mobile in short sessions | RUNTIME GAP | Mobile interruption/resumption was not exercised; in-memory restart loss is documented. |
 | C01 | Public-sector user needing accuracy and audit trails | PASS | Protected lifecycle tests preserve approval, proposal snapshots and audit events after refused revalidation. |
 | C02 | Teacher needing simple multi-user use | LIMITATION | Production OAuth/ACL isolation is outside the MVP; multi-user onboarding was not exercised. |
-| C03 | High-risk user needing sources and error protection | PASS | Fixed-reservation mutation and add/rebind bypasses are rejected by service/store tests. |
+| C03 | High-risk user needing disclaimers, sources and error protection | RUNTIME GAP | Fixed-reservation mutation and add/rebind bypasses are rejected by service/store tests; disclaimer/source assessment was not exercised. |
 | C04 | Creator needing uninterrupted work and version recovery | LIMITATION | Versions exist, but durable interruption recovery is not supported and rollback lacks a regression fixture. |
 | C05 | SRE needing observability, fail-closed checks and rollback | RUNTIME GAP | Stale approval and hard return-by rejection have tests; see the hard-constraint source caveats and unexecuted apply/rollback paths above. |
 | D01 | Manager needing summaries and exceptions | PASS | Trip/provider summaries and structured status reads are available. |

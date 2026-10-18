@@ -13,6 +13,7 @@ it('preserves fixed persona needs instead of substituting unrelated API checks',
   );
   // Needs from autodev-ng fixed-50 blob 6e3499d6ef5be7e123050e1526946f6a40f99263.
   const fixedNeeds = {
+    C03: /disclaimers.*sources.*error protection/i,
     F01: /large text.*buttons/i,
     F02: /contrast.*zoom/i,
     F03: /touch targets/i,

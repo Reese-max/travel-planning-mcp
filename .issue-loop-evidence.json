@@ -1,0 +1,12 @@
+{
+  "repo": "Reese-max/travel-planning-mcp",
+  "issue": 12,
+  "base_sha": "a97971df463acb8081caf3dc1211a7768aea6341",
+  "red_proof": "Before the report fix, added C03: /disclaimers.*sources.*error protection/i to the existing fixedNeeds regression. Ran npm test -- --run tests/quality-audit.test.ts under Git Bash: exit 1, 1 failed and 3 passed. The C03 need was 'High-risk user needing sources and error protection', which failed the disclaimer assertion; its PASS row also failed the existing /RUNTIME GAP|LIMITATION/ assertion. After restoring the need and identifying the unexecuted assessment, the same command exited 0 with all 4 tests passing.",
+  "test_command": "npm run check && npm run build",
+  "test_exit": 0,
+  "tests_passed": 262,
+  "tests_failed": 0,
+  "summary": "Restored the fixed C03 disclaimer requirement, preserved the bounded reservation-test evidence, and marked the unexecuted disclaimer/source assessment as RUNTIME GAP. Strengthened the existing fixed-persona regression and verified typecheck, all 262 tests across 19 files, and production build under Windows Git Bash.",
+  "not_done": []
+}
