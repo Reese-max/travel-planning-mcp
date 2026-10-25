@@ -76,8 +76,10 @@ describe('constraint safety', () => {
         }
         if (item.reservation_id) db.reservationPrices.set(item.reservation_id, { amount: 0, currency: 'JPY' });
       }
+      trip.version += 1;
       db.saveTrip(trip);
-      expect(service.validate(proposal.proposal_id).validation?.valid).toBe(true);
+      const currentProposal = service.create({ tripId: demoTripId, operations: proposal.operations });
+      expect(service.validate(currentProposal.proposal_id).validation?.valid).toBe(true);
     }
   });
 

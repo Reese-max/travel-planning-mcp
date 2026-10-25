@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type {
   ApprovalReceipt,
   AuditEvent,
@@ -52,6 +53,14 @@ export class MemoryStore implements TravelStore {
   }
 
   saveTrip(trip: Trip, replaceCurrent = true): void {
+    const existing = this.tripVersions.get(trip.trip_id)?.get(trip.version);
+    if (existing) {
+      if (!isDeepStrictEqual(existing, trip)) {
+        throw new Error(`Cannot overwrite immutable trip version ${trip.trip_id} v${trip.version}.`);
+      }
+      // A replay never rewrites history or moves the current pointer backwards.
+      return;
+    }
     this.assertTripInvariants(trip);
     const snapshot = copy(trip);
     let versions = this.tripVersions.get(trip.trip_id);

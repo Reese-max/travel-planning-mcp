@@ -5,6 +5,57 @@ import { MemoryStore } from '../src/store/memory-store.js';
 const FLIGHT_RESERVATION_ID = '44444444-4444-4444-8444-444444444444';
 
 describe('MemoryStore trip invariants', () => {
+  it.each([true, false])('refuses conflicting current-version contents before any write (replaceCurrent=%s)', (replaceCurrent) => {
+    const db = new MemoryStore();
+    const original = db.getTrip(demoTripId)!;
+    const conflicting = { ...original, title: 'Conflicting same-version title' };
+
+    expect(() => db.saveTrip(conflicting, replaceCurrent)).toThrow(/immutable.*version/i);
+    expect(db.getTrip(demoTripId)).toEqual(original);
+    expect(db.getTrip(demoTripId, original.version)).toEqual(original);
+    expect(db.listTripVersions(demoTripId)).toEqual([original.version]);
+  });
+
+  it.each([true, false])('refuses conflicting historical contents without changing current/history (replaceCurrent=%s)', (replaceCurrent) => {
+    const db = new MemoryStore();
+    const original = db.getTrip(demoTripId)!;
+    const current = { ...original, version: original.version + 1, title: 'New current version' };
+    db.saveTrip(current);
+
+    expect(() => db.saveTrip({ ...original, title: 'Rewritten old title' }, replaceCurrent))
+      .toThrow(/immutable.*version/i);
+    expect(db.getTrip(demoTripId, original.version)).toEqual(original);
+    expect(db.getTrip(demoTripId)).toEqual(current);
+    expect(db.listTripVersions(demoTripId)).toEqual([original.version, current.version]);
+  });
+
+  it('treats identical current/historical snapshots as no-op retries without regressing current', () => {
+    const db = new MemoryStore();
+    const original = db.getTrip(demoTripId)!;
+    const current = { ...original, version: original.version + 1, title: 'New current version' };
+    db.saveTrip(current);
+
+    for (const replaceCurrent of [true, false]) {
+      db.saveTrip(structuredClone(current), replaceCurrent);
+      db.saveTrip(structuredClone(original), replaceCurrent);
+      expect(db.getTrip(demoTripId)).toEqual(current);
+      expect(db.getTrip(demoTripId, original.version)).toEqual(original);
+      expect(db.listTripVersions(demoTripId)).toEqual([original.version, current.version]);
+    }
+  });
+
+  it('compares full snapshot contents rather than title or object-key order alone', () => {
+    const db = new MemoryStore();
+    const original = db.getTrip(demoTripId)!;
+    const reordered = Object.fromEntries(Object.entries(original).reverse()) as typeof original;
+    expect(() => db.saveTrip(reordered)).not.toThrow();
+
+    const changed = structuredClone(original);
+    changed.days[0]!.items[0]!.title = 'Conflicting nested item';
+    expect(() => db.saveTrip(changed)).toThrow(/immutable.*version/i);
+    expect(db.getTrip(demoTripId)).toEqual(original);
+  });
+
   it('rejects an unlocked item that references a fixed reservation', () => {
     const db = new MemoryStore();
     const trip = db.getTrip(demoTripId)!;

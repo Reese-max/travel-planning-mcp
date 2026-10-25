@@ -42,6 +42,7 @@ function fixture(options: FixtureOptions) {
   trip.end_date = date;
   trip.days = [day];
   trip.reservation_ids = [];
+  trip.version += 1;
   db.saveTrip(trip);
   if (options.baseTimezone !== undefined) {
     const base = db.getPlace(BASE_PLACE_ID)!;
@@ -127,7 +128,7 @@ describe('canonical constraint clock', () => {
     expect(() => service.approve({ proposalId: proposal.proposal_id, actorId: 'operator', channel: 'ui' })).toThrow();
     expect(() => service.apply(proposal.proposal_id)).toThrow();
     expect(db.getTrip(demoTripId)).toEqual(before);
-    expect(db.listTripVersions(demoTripId)).toEqual([1]);
+    expect(db.listTripVersions(demoTripId)).toEqual([1, 2]);
   });
 
   it.each(temporalCases)('warns for soft %s when the day timezone is missing', (type, parameters) => {
@@ -200,7 +201,7 @@ describe('duration-bearing notes are operational activities', () => {
     expect(validate().hard_constraint_violations.join(' ')).toContain('cannot be evaluated safely');
     expect(() => service.approve({ proposalId: proposal.proposal_id, actorId: 'operator', channel: 'ui' })).toThrow();
     expect(db.getTrip(demoTripId)).toEqual(before);
-    expect(db.listTripVersions(demoTripId)).toEqual([1]);
+    expect(db.listTripVersions(demoTripId)).toEqual([1, 2]);
   });
 
   it.each(applicableCases)('allows ordinary metadata notes and explicit duration zero under %s', (type, parameters) => {
