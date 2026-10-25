@@ -29,6 +29,7 @@ export interface IdempotencyRecord {
 export interface TravelStore {
   listTrips(): Trip[];
   getTrip(tripId: string, version?: number): Trip | undefined;
+  /** Existing versions are immutable: reject different contents; identical retries never change history/current. */
   saveTrip(trip: Trip, replaceCurrent?: boolean): void;
   listTripVersions(tripId: string): number[];
 

@@ -35,6 +35,7 @@ function fixture(type: Constraint['type'], parameters: Record<string, unknown>, 
   item.route = { mode: 'walking', distance_meters: 0, duration_minutes: 0, source: 'synthetic-test' };
   trip.days = [{ date: '2026-10-20', items: [item] }];
   trip.reservation_ids = [];
+  trip.version += 1;
   db.saveTrip(trip);
   const place = db.getPlace(PLACE_ID)!;
   db.savePlace({ ...place, planning: { ...place.planning, estimated_cost: { amount: 0, currency: 'JPY' } } });
@@ -57,6 +58,7 @@ function removeEvidence(db: EvidenceStore, type: Constraint['type']) {
     const place = db.getPlace(PLACE_ID)!;
     db.savePlace({ ...place, planning: { ...place.planning, estimated_cost: null } });
   } else item.route = null;
+  trip.version += 1;
   db.saveTrip(trip);
 }
 
@@ -72,7 +74,7 @@ describe('constraint evidence safety', () => {
     expect(() => service.approve({ proposalId: proposal.proposal_id, actorId: 'operator', channel: 'ui' })).toThrow();
     expect(() => service.apply(proposal.proposal_id)).toThrow();
     expect(db.getTrip(demoTripId)).toEqual(before);
-    expect(db.listTripVersions(demoTripId)).toEqual([1]);
+    expect(db.listTripVersions(demoTripId)).toEqual([1, 2, 3]);
   });
 
   it.each(evidenceCases)('warns for soft %s with unknown evidence', (type, parameters) => {
@@ -88,7 +90,7 @@ describe('constraint evidence safety', () => {
     const proposal = create();
     expect(service.validate(proposal.proposal_id).validation?.valid).toBe(true);
     service.approve({ proposalId: proposal.proposal_id, actorId: 'operator', channel: 'ui' });
-    expect(service.apply(proposal.proposal_id).trip.version).toBe(2);
+    expect(service.apply(proposal.proposal_id).trip.version).toBe(3);
   });
 
   it.each([
@@ -98,6 +100,7 @@ describe('constraint evidence safety', () => {
     const trip = db.getTrip(demoTripId)!;
     trip.days[0]!.items[0]!.start_at = value;
     trip.days[0]!.items[0]!.end_at = value;
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.hard_constraint_violations.join(' '))
       .toContain('cannot be evaluated safely');
@@ -108,6 +111,7 @@ describe('constraint evidence safety', () => {
     const { db, service, create } = fixture(type, parameters);
     const trip = db.getTrip(demoTripId)!;
     trip.days[0]!.items[0]!.end_at = null;
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.valid).toBe(false);
   });
@@ -116,6 +120,7 @@ describe('constraint evidence safety', () => {
     const { db, service, create } = fixture('return_by', { time: '20:00' });
     const trip = db.getTrip(demoTripId)!;
     trip.days[0]!.items[0]!.end_at = end;
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.valid).toBe(false);
   });
@@ -124,6 +129,7 @@ describe('constraint evidence safety', () => {
     const { db, service, create } = fixture('return_by', { time: '20:00' });
     const trip = db.getTrip(demoTripId)!;
     trip.days[0]!.items[0]!.end_at = '2026-10-20T20:00:00.000+09:00';
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.valid).toBe(true);
   });
@@ -136,6 +142,7 @@ describe('constraint evidence safety', () => {
     const unknown: TripItem = { ...trip.days[0]!.items[0]!, item_id: 'synthetic-unknown',
       place_id: unknownPlace.place_id, start_at: null, end_at: null, route: null };
     trip.days[0]!.items.push(unknown);
+    trip.version += 1;
     db.saveTrip(trip);
     const before = db.getTrip(demoTripId);
     db.constraint.scope.item_ids = [ITEM_ID];
@@ -149,7 +156,7 @@ describe('constraint evidence safety', () => {
     db.constraint.scope.item_ids = [ITEM_ID, unknown.item_id];
     expect(() => service.apply(proposal.proposal_id)).toThrow();
     expect(db.getTrip(demoTripId)).toEqual(before);
-    expect(db.listTripVersions(demoTripId)).toEqual([1]);
+    expect(db.listTripVersions(demoTripId)).toEqual([1, 2, 3]);
     expect(db.getProposal(proposal.proposal_id)?.status).toBe('approved');
   });
 
@@ -167,6 +174,7 @@ describe('constraint evidence safety', () => {
     expect(service.validate(create().proposal_id).validation?.valid).toBe(false);
     const trip = db.getTrip(demoTripId)!;
     trip.days[0]!.items[0]!.place_id = null;
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.hard_constraint_violations.join(' ')).toContain('no priced');
   });
@@ -175,6 +183,7 @@ describe('constraint evidence safety', () => {
     const { db, service, create } = fixture('max_walking_distance', { kilometers: 1 });
     const trip = db.getTrip(demoTripId)!;
     trip.days[0]!.items[0]!.route!.distance_meters = distance;
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.valid).toBe(false);
   });
@@ -186,6 +195,7 @@ describe('constraint evidence safety', () => {
     trip.days[0]!.items.push({ item_id: 'synthetic-reservation', type: 'reservation',
       reservation_id: reservation.reservation_id, locked: true, start_at: reservation.start_at,
       end_at: reservation.end_at });
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.valid).toBe(false);
     db.reservationEvidence = { ...reservation, price: { amount: 0, currency: 'JPY' } };
@@ -198,6 +208,7 @@ describe('constraint evidence safety', () => {
     const trip = db.getTrip(demoTripId)!;
     trip.days[0]!.items.push({ item_id: 'synthetic-note', type: 'note', locked: false },
       { item_id: 'synthetic-free-time', type: 'free_time', locked: false });
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.valid).toBe(true);
   });
@@ -207,9 +218,11 @@ describe('constraint evidence safety', () => {
     const trip = db.getTrip(demoTripId)!;
     const note: TripItem = { item_id: 'synthetic-note', type: 'note', locked: false, title: 'Remember an umbrella' };
     trip.days[0]!.items.push(note);
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.valid).toBe(true);
     Object.assign(note, { source_timing: { provider: 'trip', local_date: '2026-10-20', local_time: '09:00', timezone: null } });
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.valid).toBe(false);
   });
@@ -218,13 +231,16 @@ describe('constraint evidence safety', () => {
     const { db, service, create } = fixture('max_daily_budget', { amount: 0, currency: 'JPY' });
     const trip = db.getTrip(demoTripId)!;
     trip.days[0]!.items.push({ item_id: 'synthetic-note', type: 'note', locked: false });
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.valid).toBe(true);
     const freeTime: TripItem = { item_id: 'synthetic-free-time', type: 'free_time', locked: false };
     trip.days[0]!.items.push(freeTime);
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.valid).toBe(false);
     freeTime.place_id = PLACE_ID; // Explicit zero estimate, not a type-name assumption.
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.valid).toBe(true);
   });
@@ -234,6 +250,7 @@ describe('constraint evidence safety', () => {
     const { db, service, create } = fixture(type, parameters);
     const trip = db.getTrip(demoTripId)!;
     trip.days[0]!.items.push({ item_id: 'synthetic-free-time', type: 'free_time', place_id: PLACE_ID, locked: false });
+    trip.version += 1;
     db.saveTrip(trip);
     expect(service.validate(create().proposal_id).validation?.valid).toBe(false);
   });

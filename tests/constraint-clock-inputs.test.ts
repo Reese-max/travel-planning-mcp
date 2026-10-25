@@ -21,6 +21,7 @@ function fixture(type: Constraint['type'], parameters: Record<string, unknown>, 
   item.end_at = '2026-10-20T19:00:00+09:00';
   trip.days = [{ date: '2026-10-20', base_place_id: BASE_PLACE_ID, items: [item] }];
   trip.reservation_ids = [];
+  trip.version += 1;
   db.saveTrip(trip);
   const service = new ProposalService(db);
   const update = (to: Record<string, unknown>) => service.create({ tripId: demoTripId,
@@ -68,6 +69,7 @@ describe('unknown proposal fields cannot become metadata exemptions', () => {
     const trip = db.getTrip(demoTripId)!;
     const note: TripItem = { item_id: 'proposal-note', type: 'note', title: 'Synthetic note', locked: false };
     trip.days[0]!.items.push(note);
+    trip.version += 1;
     db.saveTrip(trip);
     // Operation to-fields are unknown records at the HTTP proposal boundary.
     const proposal = service.create({ tripId: demoTripId, operations: [{ operation: 'update',
@@ -79,6 +81,6 @@ describe('unknown proposal fields cannot become metadata exemptions', () => {
     expect(() => service.approve({ proposalId: proposal.proposal_id, actorId: 'operator', channel: 'ui' })).toThrow();
     expect(() => service.apply(proposal.proposal_id)).toThrow();
     expect(db.getTrip(demoTripId)).toEqual(before);
-    expect(db.listTripVersions(demoTripId)).toEqual([1]);
+    expect(db.listTripVersions(demoTripId)).toEqual([1, 2, 3]);
   });
 });

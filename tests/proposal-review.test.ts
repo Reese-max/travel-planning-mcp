@@ -7,7 +7,7 @@ import { MemoryStore } from '../src/store/memory-store.js';
 const ID = '88888888-8888-4888-8888-888888888888';
 function setup(items?: TripItem[]) {
   const db = new MemoryStore(), trip = db.getTrip(demoTripId)!;
-  if (items) { trip.days = [{ date: trip.start_date, items }, { date: trip.end_date, items: [] }]; trip.constraint_ids = []; trip.reservation_ids = []; trip.place_ids = []; db.saveTrip(trip); }
+  if (items) { trip.days = [{ date: trip.start_date, items }, { date: trip.end_date, items: [] }]; trip.constraint_ids = []; trip.reservation_ids = []; trip.place_ids = []; trip.version += 1; db.saveTrip(trip); }
   const service = new ProposalService(db);
   return { db, service, trip };
 }
